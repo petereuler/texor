@@ -1,0 +1,108 @@
+{
+  "name": "texor",
+  "displayName": "TEXOR Workbench",
+  "description": "Open the TEXOR browser workbench from VSCode and revise LaTeX manuscripts through PDF feedback with TEXOR Agent or Codex CLI.",
+  "version": "0.2.4",
+  "publisher": "texor",
+  "engines": {
+    "vscode": "^1.107.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "texor",
+    "codex",
+    "latex",
+    "paper",
+    "manuscript",
+    "research",
+    "pdf",
+    "diff"
+  ],
+  "galleryBanner": {
+    "color": "#101214",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:texor.open"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "texor.open",
+        "title": "TEXOR: Open Browser Workbench"
+      }
+    ],
+    "configuration": {
+      "title": "texor",
+      "properties": {
+        "texor.serverUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4174",
+          "description": "texor backend URL."
+        },
+        "texor.webUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:4174",
+          "description": "texor web review URL."
+        },
+        "texor.appPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional override for the TEXOR application directory. Leave empty to use the app bundled inside this extension."
+        },
+        "texor.targetJournal": {
+          "type": "string",
+          "default": "",
+          "description": "Default target journal or conference."
+        },
+        "texor.codexExecutable": {
+          "type": "string",
+          "default": "codex",
+          "description": "Codex CLI executable used for browser-submitted tasks."
+        },
+        "texor.agentProvider": {
+          "type": "string",
+          "default": "OpenAI-compatible",
+          "description": "Provider label for TEXOR Agent."
+        },
+        "texor.agentBaseUrl": {
+          "type": "string",
+          "default": "https://api.openai.com/v1",
+          "description": "OpenAI-compatible base URL for TEXOR Agent."
+        },
+        "texor.agentModel": {
+          "type": "string",
+          "default": "gpt-4.1-mini",
+          "description": "Model name used by TEXOR Agent."
+        },
+        "texor.agentImageModel": {
+          "type": "string",
+          "default": "gpt-image-1",
+          "description": "Image generation model used by TEXOR Agent for structure diagrams."
+        },
+        "texor.agentApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key used by TEXOR Agent. Prefer setting this in user settings or the browser workbench."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./tsconfig.json"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/vscode": "^1.107.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build texor VSCode Extension",
+      "type": "shell",
+      "command": "npm run build:extension-dev",
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}

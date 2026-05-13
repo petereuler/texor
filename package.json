@@ -1,0 +1,49 @@
+{
+  "name": "texor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A local-first paper writing copilot for turning research projects into journal-ready LaTeX drafts.",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:client": "vite",
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:vscode": "tsc -p vscode-extension/tsconfig.json",
+    "build:extension-dev": "bash scripts/build-extension-dev.sh",
+    "install:dev-extension": "bash scripts/install-dev-extension.sh",
+    "start:dev-extension": "bash scripts/start-dev-extension-server.sh",
+    "package:vscode": "bash scripts/package-vsix.sh",
+    "setup:codex": "bash scripts/setup-codex.sh",
+    "install:vscode-extension": "bash scripts/install-vscode-extension.sh",
+    "start:texor": "bash scripts/start-texor.sh",
+    "stop:texor": "bash scripts/stop-texor.sh",
+    "doctor": "bash scripts/doctor.sh",
+    "start": "node dist-server/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p vscode-extension/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "diff": "^7.0.0",
+    "express": "^4.21.2",
+    "lucide-react": "^0.511.0",
+    "pdfjs-dist": "^3.11.174",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.10.0",
+    "@types/react": "^18.3.24",
+    "@types/react-dom": "^18.3.7",
+    "@types/vscode": "^1.118.0",
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  }
+}

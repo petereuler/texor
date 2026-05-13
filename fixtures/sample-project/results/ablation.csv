@@ -1,0 +1,4 @@
+Setting,Recall@1,Recall@10
+Baseline encoder,42.1,74.8
+Latent router,46.2,79.4
+Latent router + hard negatives,47.0,80.1
