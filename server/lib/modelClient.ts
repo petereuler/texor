@@ -10,7 +10,9 @@ export interface ModelTextResponse {
   content: string;
 }
 
-function resolveModelConfig(config?: ModelConfig): Required<ModelConfig> | null {
+function resolveModelConfig(
+  config?: ModelConfig,
+): (Required<Omit<ModelConfig, 'reasoningEffort'>> & { reasoningEffort?: string }) | null {
   const apiKey = config?.apiKey || process.env.OPENAI_API_KEY;
   if (!apiKey) {
     return null;
@@ -22,6 +24,7 @@ function resolveModelConfig(config?: ModelConfig): Required<ModelConfig> | null 
     model: config?.model || process.env.OPENAI_MODEL || 'gpt-4.1-mini',
     provider: config?.provider || process.env.OPENAI_PROVIDER || 'OpenAI-compatible',
     imageModel: config?.imageModel || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1',
+    reasoningEffort: config?.reasoningEffort,
   };
 }
 

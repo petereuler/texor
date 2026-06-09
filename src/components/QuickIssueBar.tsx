@@ -1,15 +1,19 @@
 import { Send, Sparkles, X } from 'lucide-react';
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import type { TaskSpeedMode } from '../types';
 
 export interface QuickIssueBarProps {
   selectedText?: string;
   anchor: { x: number; y: number };
   onCancel: () => void;
-  onSubmit: (payload: { issue: string; changeRequest: string }) => Promise<void> | void;
+  onSubmit: (payload: { issue: string; changeRequest: string; taskSpeedMode: TaskSpeedMode }) => Promise<void> | void;
 }
 
-export function QuickIssueBar({ anchor, onCancel, onSubmit }: QuickIssueBarProps) {
+export function QuickIssueBar({ selectedText, anchor, onCancel, onSubmit }: QuickIssueBarProps) {
   const [comment, setComment] = useState('');
+  const [taskSpeedMode, setTaskSpeedMode] = useState<TaskSpeedMode>(() => {
+    return (window.localStorage.getItem('texor.quickIssueSpeedMode') as TaskSpeedMode) || 'quick';
+  });
   const [submitting, setSubmitting] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -26,6 +30,10 @@ export function QuickIssueBar({ anchor, onCancel, onSubmit }: QuickIssueBarProps
     input.style.height = `${Math.min(96, Math.max(28, input.scrollHeight))}px`;
   }, [comment]);
 
+  useEffect(() => {
+    window.localStorage.setItem('texor.quickIssueSpeedMode', taskSpeedMode);
+  }, [taskSpeedMode]);
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     const request = comment.trim();
@@ -38,6 +46,7 @@ export function QuickIssueBar({ anchor, onCancel, onSubmit }: QuickIssueBarProps
       await onSubmit({
         issue: 'PDF selection revision',
         changeRequest: request,
+        taskSpeedMode,
       });
     } finally {
       setSubmitting(false);
@@ -53,13 +62,37 @@ export function QuickIssueBar({ anchor, onCancel, onSubmit }: QuickIssueBarProps
 
   return (
     <form
-      className="quick-issue-bar"
-      style={{ left: Math.max(anchor.x - 170, 16), top: anchor.y + 8 }}
+      className={`quick-issue-bar ${selectedText ? 'has-selection' : ''}`}
+      style={{
+        left: Math.max(anchor.x - 170, 16),
+        top: Math.min(anchor.y + 8, window.innerHeight - 84),
+      }}
       onSubmit={handleSubmit}
     >
       <div className="quick-issue-bar__meta">
         <Sparkles size={12} />
       </div>
+      <div className="quick-issue-bar__speed-switch" role="tablist" aria-label="任务速度">
+        <button
+          type="button"
+          className={taskSpeedMode === 'quick' ? 'is-active' : ''}
+          onClick={() => setTaskSpeedMode('quick')}
+          aria-label="快速模式"
+          title="快速模式"
+        >
+          快
+        </button>
+        <button
+          type="button"
+          className={taskSpeedMode === 'deep' ? 'is-active' : ''}
+          onClick={() => setTaskSpeedMode('deep')}
+          aria-label="深度模式"
+          title="深度模式"
+        >
+          深
+        </button>
+      </div>
+      {selectedText ? <div className="quick-issue-bar__selection">{selectedText}</div> : null}
       <textarea
         ref={inputRef}
         value={comment}

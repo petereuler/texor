@@ -30,13 +30,13 @@ This supports OpenAI and providers that expose compatible APIs, such as DeepSeek
 The model must return exactly one JSON object per step:
 
 ```json
-{"thought":"brief status","tool":"read_file","args":{"path":"relative/path"}}
+{"process":"brief user-facing writing step","tool":"read_file","args":{"path":"relative/path"}}
 ```
 
 or:
 
 ```json
-{"thought":"brief status","final":"short summary"}
+{"process":"brief user-facing writing step","final":"short summary"}
 ```
 
 Current tools:
@@ -62,6 +62,42 @@ TEXOR Agent classifies each browser request before entering the graph:
 - `general`: the default route, using the smallest adequate workflow.
 
 The routing keeps simple paragraph edits fast while still allowing careful multi-step work for experiments, figures, and full-manuscript consistency.
+
+## Execution Policy
+
+Routing is only the first layer. TEXOR now derives an execution policy before choosing the runtime path.
+
+Execution profiles:
+
+- `quick-local-edit`: front-end, single-span manuscript editing for wording/polish tasks. It avoids project scanning, avoids long-lived session reuse, forbids project commands, and prefers the direct local replace path.
+- `manuscript-edit`: lightweight manuscript revision without code execution. It can read the current manuscript and optional saved project context, but it stays in a foreground writing lane.
+- `reference-research`: reference/citation work with paper search enabled, but still without project execution by default.
+- `diagram-generation`: figure-oriented writing work that can generate diagram assets without turning every task into a long-running repo workflow.
+- `project-execution`: long-running repository work for tasks like source understanding, initial drafting from code, rerunning experiments, updating result figures, or other requests that truly require grounded project commands.
+
+Each execution policy controls more than prompt wording:
+
+- whether the task runs in a foreground fast lane or a background long-running lane
+- whether saved project context is skipped, read-only, or refreshed/seeded
+- whether prior conversation memory is loaded
+- whether Codex/Claude sessions are resumed or treated as isolated turns
+- whether ephemeral Codex sessions are used for short tasks
+- whether `run_command`, `generate_image`, or `search_papers` are even available
+- which project paths are writable in that lane
+- whether post-run changed files are audited against the lane policy
+- timeout caps and multi-step budgets
+
+Examples of structural enforcement already handled below the prompt layer:
+
+- quick wording lanes cannot resume the project’s long-lived Codex session and use ephemeral CLI sessions when available
+- source-understanding turns can refresh only the persistent project-context file, while manuscript saves are restored/blocked
+- TEXOR Agent tool calls can write only to policy-approved paths such as `main.tex`, `.texor/agent/project-context.md`, approved figure outputs, or bibliography targets for reference work
+- external CLI runs are audited after completion so lane-forbidden file writes fail even if the model ignored the prompt
+- manuscript version saving rejects obviously broken outputs such as non-LaTeX fragments, severe truncation, or leaked internal control text
+
+This mirrors how Codex-like agents distinguish short interactive edits from background agentic work: the separation lives in orchestration, session policy, tool permissions, and context loading, not only in the natural-language prompt.
+
+The same direction now applies to revision APIs too: localized wording feedback is moving from whole-block regeneration toward structured patching, so narrow edits are resolved as bounded replacements before TEXOR falls back to broader block rewriting.
 
 ## Why Not Bundle LangGraph Yet
 

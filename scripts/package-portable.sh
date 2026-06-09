@@ -165,6 +165,36 @@ check_cmd() {
   fi
 }
 
+detect_platform_codex() {
+  local os_name
+  local arch_name
+  case "$(uname -s)" in
+    Linux) os_name="linux" ;;
+    Darwin) os_name="darwin" ;;
+    *) os_name="" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch_name="x64" ;;
+    arm64|aarch64) arch_name="arm64" ;;
+    *) arch_name="" ;;
+  esac
+  local platform_dir=""
+  if [[ -n "$os_name" && -n "$arch_name" ]]; then
+    platform_dir="${os_name}-${arch_name}"
+  fi
+
+  local roots=("$HOME/.vscode-server/extensions" "$HOME/.vscode/extensions")
+  local root
+  for root in "${roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    if [[ -n "$platform_dir" ]]; then
+      find "$root" -path "*/openai.chatgpt-*/bin/${platform_dir}/codex" -type f 2>/dev/null | head -n 1 && return 0
+    fi
+    find "$root" -path '*/openai.chatgpt-*/bin/*/codex' -type f 2>/dev/null | head -n 1 && return 0
+  done
+  return 1
+}
+
 check_cmd node
 check_cmd npm
 
@@ -177,9 +207,9 @@ fi
 if command -v codex >/dev/null 2>&1; then
   echo "ok   command: codex"
 else
-  codex_path="$(find "$HOME/.vscode-server/extensions" "$HOME/.vscode/extensions" -path '*/openai.chatgpt-*/bin/*/codex' -type f 2>/dev/null | head -n 1 || true)"
+  codex_path="$(detect_platform_codex || true)"
   if [[ -n "$codex_path" ]]; then
-    echo "ok   OpenAI extension Codex CLI: $codex_path"
+    echo "ok   OpenAI extension Codex binary: $codex_path"
   else
     echo "miss Codex CLI: install OpenAI/Codex in VSCode or set texor.codexExecutable"
   fi
@@ -366,7 +396,7 @@ if ($codex) {
     }
   }
   if ($found) {
-    Write-Host "ok   OpenAI extension Codex CLI: $($found.FullName)"
+    Write-Host "ok   OpenAI extension Codex binary: $($found.FullName)"
   } else {
     Write-Host "miss Codex CLI: install OpenAI/Codex in VSCode or set texor.codexExecutable"
   }
@@ -425,7 +455,7 @@ mkdir -p "$EXT_DIR"
 cp "$EXT_SRC/package.json" "$EXT_SRC/README.md" "$EXT_SRC/CHANGELOG.md" "$EXT_SRC/LICENSE" "$EXT_DIR/"
 cp -R "$EXT_SRC/dist" "$EXT_DIR/dist"
 
-CODEX_CLI="$(find "$HOME/.vscode-server/extensions" "$HOME/.vscode/extensions" -path '*/openai.chatgpt-*/bin/*/codex' -type f 2>/dev/null | head -n 1 || true)"
+CODEX_CLI="$(detect_platform_codex || true)"
 if [[ -z "$CODEX_CLI" ]]; then
   CODEX_CLI="$(command -v codex || true)"
 fi

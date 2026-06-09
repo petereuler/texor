@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { CodexPaperCreateRequest, CodexPaperVersionRequest, PaperBlock, PaperRecord, PaperVersion, WorkspaceSnapshot } from '../types.js';
+import { enrichPaperVersion, extractDocumentTitle } from './manuscriptState.js';
 import { appendVersion } from './versionStore.js';
 
 function nowIso(): string {
@@ -26,10 +27,12 @@ export function createCodexWorkspace(request: CodexPaperCreateRequest): Workspac
     targetJournal: request.targetJournal,
     authors: request.authors || [],
     projectRoot: request.projectRoot,
+    executionTarget: request.executionTarget,
     assetRoots: request.assetRoots,
+    runtimeConfig: request.runtimeConfig,
     createdAt: nowIso(),
   };
-  const version: PaperVersion = {
+  const version: PaperVersion = enrichPaperVersion({
     id: crypto.randomUUID(),
     paperId,
     label: 'v1',
@@ -38,7 +41,11 @@ export function createCodexWorkspace(request: CodexPaperCreateRequest): Workspac
     sourcePath: request.sourcePath,
     blocks: blocksFromLatex(request.latex),
     latex: request.latex,
-  };
+  }, undefined, {
+    projectRoot: request.projectRoot,
+    assetRoots: request.assetRoots,
+    sourcePath: request.sourcePath,
+  });
 
   return {
     paper,
@@ -52,7 +59,7 @@ export async function appendCodexVersion(
   versionCount: number,
   request: CodexPaperVersionRequest,
 ): Promise<WorkspaceSnapshot> {
-  const version: PaperVersion = {
+  const version: PaperVersion = enrichPaperVersion({
     id: crypto.randomUUID(),
     paperId: paper.id,
     label: `v${versionCount + 1}`,
@@ -60,9 +67,25 @@ export async function appendCodexVersion(
     createdAt: nowIso(),
     sourcePath: request.sourcePath,
     basedOnVersionId: request.basedOnVersionId,
+    focusTarget: request.focusTarget,
     blocks: blocksFromLatex(request.latex),
     latex: request.latex,
-  };
+  }, undefined, {
+    projectRoot: paper.projectRoot,
+    assetRoots: paper.assetRoots,
+    sourcePath: request.sourcePath,
+  });
 
-  return appendVersion(paper, version);
+  const nextTitle = request.title?.trim() || extractDocumentTitle(request.latex) || paper.title;
+  const nextTargetJournal = request.targetJournal?.trim() || paper.targetJournal;
+  const nextPaper =
+    nextTitle !== paper.title || nextTargetJournal !== paper.targetJournal
+      ? {
+          ...paper,
+          title: nextTitle,
+          targetJournal: nextTargetJournal,
+        }
+      : paper;
+
+  return appendVersion(nextPaper, version);
 }

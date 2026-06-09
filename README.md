@@ -20,10 +20,12 @@ Then reload VSCode:
 Ctrl+Shift+P -> Developer: Reload Window
 ```
 
+If the TEXOR command still does not appear, trust the current workspace first.
+
 ## Daily Use
 
 1. Open your research project in VSCode.
-2. Run `Texor: Open`.
+2. Run `TEXOR: Open Browser Workbench`.
 3. Use the browser workbench to enter the project path, target journal, and what Codex CLI should do.
 4. Click `交给 Codex`.
 5. Codex CLI writes or revises `.texor/manuscript/main.tex` inside that project.
@@ -45,6 +47,7 @@ npm run start:texor
 npm run stop:texor
 npm run doctor
 npm run install:vscode-extension
+npm run restart:dev-workbench
 ```
 
 ## Live Codex Loop

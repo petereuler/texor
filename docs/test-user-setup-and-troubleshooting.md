@@ -11,7 +11,7 @@ Users should prepare:
 
 - VSCode.
 - A working LaTeX distribution with `pdflatex` or `lualatex` on `PATH`.
-- Codex CLI, available as `codex` from a normal terminal.
+- Codex access, either from a normal terminal `codex` command or from the OpenAI/Codex VSCode extension bundle.
 - Internet access if using a journal template for the first time.
 
 ## Template Source
@@ -82,7 +82,7 @@ where.exe codex
 codex --version
 ```
 
-If `where.exe codex` prints nothing, Codex CLI is not on `PATH`.
+If `where.exe codex` prints nothing, TEXOR can still work if the OpenAI/Codex VSCode extension is installed and contains a Windows Codex binary.
 
 ## Minimal Windows Environment Check
 
@@ -100,6 +100,5 @@ where.exe codex
 Expected:
 
 - `pdflatex --version` or `lualatex --version` must succeed.
-- `codex --version` must succeed.
-- `where.exe codex` should ideally include `codex.cmd` or `codex.exe`.
-
+- Either `codex --version` succeeds, or the OpenAI/Codex VSCode extension provides a Windows Codex binary under its `bin/win32-*` directory.
+- If `where.exe codex` returns nothing, check whether `texor.codexExecutable` was previously set to a stale path from another machine or platform.

@@ -25,7 +25,38 @@ If you want the command to appear in the normal VSCode Command Palette, run:
 npm run install:dev-extension
 ```
 
-Then reload VSCode and use `Command+Shift+P`:
+This now installs a separate local development extension:
+
+```text
+texor-dev.texor@<repo-version>-dev
+display name: TEXOR Workbench (Dev)
+```
+
+It is generated from the current repository and replaces the Marketplace TEXOR
+entry in the active remote extension registry, so `Ctrl+Shift+P` uses this
+repo's development build instead of a stale Marketplace/VSIX copy.
+
+For the normal repo-level dev workflow (`npm run start:texor`), the installer
+also points `texor.serverUrl` and `texor.webUrl` at `http://127.0.0.1:4173`
+so the command palette opens the live Vite frontend from the current repo.
+
+The installer also clears TEXOR-related VS Code extension caches so stale VSIX
+entries do not hide the current development command.
+
+Then reload VSCode and use `Ctrl+Shift+P`:
+
+```text
+TEXOR: Open Browser Workbench
+```
+
+If the command still does not appear, make sure the current workspace is
+trusted first. In Restricted Mode VS Code can hide extension commands.
+
+For the full restart flow you can also use:
+
+```bash
+npm run restart:dev-workbench
+```
 
 ## After UI Changes
 
@@ -36,10 +67,12 @@ npm run build:extension-dev
 npm run start:dev-extension
 ```
 
-For extension command changes, reinstall:
+For extension command changes, rebuild the extension bundle and reload VSCode.
+You normally do not need to reinstall because the extension directory is
+symlinked to this repo:
 
 ```bash
-npm run install:dev-extension
+npm run build:vscode
 ```
 
 ## Remote Access

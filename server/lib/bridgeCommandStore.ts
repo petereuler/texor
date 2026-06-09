@@ -13,8 +13,8 @@ import {
 
 const dataDir = dataPath();
 const bridgeFile = dataPath('bridge-commands.json');
-const terminalCommandTtlMs = 24 * 60 * 60_000;
-const runningCommandTtlMs = 10 * 60_000;
+const terminalCommandTtlMs = 7 * 24 * 60 * 60_000;
+const runningCommandTtlMs = 30 * 60_000;
 let mutationQueue: Promise<unknown> = Promise.resolve();
 
 async function ensureStore(): Promise<void> {
@@ -43,7 +43,10 @@ async function loadState(): Promise<BridgeCommandStoreState> {
 
 async function saveState(state: BridgeCommandStoreState): Promise<void> {
   await fs.mkdir(dataDir, { recursive: true });
-  const tempFile = path.join(dataDir, `.${path.basename(bridgeFile)}.${process.pid}.${Date.now()}.tmp`);
+  const tempFile = path.join(
+    dataDir,
+    `.${path.basename(bridgeFile)}.${process.pid}.${Date.now()}.${crypto.randomUUID()}.tmp`,
+  );
   await fs.writeFile(tempFile, JSON.stringify(state, null, 2));
   await fs.rename(tempFile, bridgeFile);
 }
@@ -145,29 +148,29 @@ export async function listBridgeCommands(options: {
   paperId?: string;
   projectPath?: string;
 } = {}): Promise<BridgeCommand[]> {
-  const state = await loadState();
-  pruneState(state);
-  await saveState(state);
-  const limit = Math.max(1, Math.min(options.limit || 20, 100));
-  const requestedProjectPath = options.projectPath ? path.resolve(options.projectPath) : undefined;
-  const sorted = Object.values(state.commands)
-    .filter((entry) => !options.status || entry.status === options.status)
-    .filter((entry) => {
-      if (!options.paperId && !requestedProjectPath) {
-        return true;
-      }
-      const payload = entry.payload;
-      const paperMatches = options.paperId && 'paperId' in payload && payload.paperId === options.paperId;
-      const projectMatches =
-        requestedProjectPath &&
-        'projectPath' in payload &&
-        payload.projectPath &&
-        path.resolve(payload.projectPath) === requestedProjectPath;
-      return Boolean(paperMatches || projectMatches);
-    })
-    .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-  const commands = options.status ? sorted.slice(0, limit) : sorted.slice(-limit);
-  return commands.map(normalizeCommand);
+  return mutateState((state) => {
+    pruneState(state);
+    const limit = Math.max(1, Math.min(options.limit || 20, 100));
+    const requestedProjectPath = options.projectPath ? path.resolve(options.projectPath) : undefined;
+    const sorted = Object.values(state.commands)
+      .filter((entry) => !options.status || entry.status === options.status)
+      .filter((entry) => {
+        if (!options.paperId && !requestedProjectPath) {
+          return true;
+        }
+        const payload = entry.payload;
+        const paperMatches = options.paperId && 'paperId' in payload && payload.paperId === options.paperId;
+        const projectMatches =
+          requestedProjectPath &&
+          'projectPath' in payload &&
+          payload.projectPath &&
+          path.resolve(payload.projectPath) === requestedProjectPath;
+        return Boolean(paperMatches || projectMatches);
+      })
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+    const commands = options.status ? sorted.slice(0, limit) : sorted.slice(-limit);
+    return commands.map(normalizeCommand);
+  });
 }
 
 export async function readBridgeCommand(commandId: string): Promise<BridgeCommand | null> {

@@ -5,6 +5,36 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXT_DIR_SERVER="$HOME/.vscode-server/extensions/texor.texor-vscode-0.1.0"
 EXT_DIR_LOCAL="$HOME/.vscode/extensions/texor.texor-vscode-0.1.0"
 
+detect_platform_codex() {
+  local os_name
+  local arch_name
+  case "$(uname -s)" in
+    Linux) os_name="linux" ;;
+    Darwin) os_name="darwin" ;;
+    *) os_name="" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) arch_name="x64" ;;
+    arm64|aarch64) arch_name="arm64" ;;
+    *) arch_name="" ;;
+  esac
+  local platform_dir=""
+  if [[ -n "$os_name" && -n "$arch_name" ]]; then
+    platform_dir="${os_name}-${arch_name}"
+  fi
+
+  local roots=("$HOME/.vscode-server/extensions" "$HOME/.vscode/extensions")
+  local root
+  for root in "${roots[@]}"; do
+    [[ -d "$root" ]] || continue
+    if [[ -n "$platform_dir" ]]; then
+      find "$root" -path "*/openai.chatgpt-*/bin/${platform_dir}/codex" -type f 2>/dev/null | head -n 1 && return 0
+    fi
+    find "$root" -path '*/openai.chatgpt-*/bin/*/codex' -type f 2>/dev/null | head -n 1 && return 0
+  done
+  return 1
+}
+
 echo "texor doctor"
 echo
 
@@ -34,11 +64,11 @@ check_cmd pdflatex
 if command -v codex >/dev/null 2>&1; then
   echo "ok   command: codex"
 else
-  codex_path="$(find "$HOME/.vscode-server/extensions" "$HOME/.vscode/extensions" -path '*/bin/*/codex' -type f 2>/dev/null | head -n 1 || true)"
+  codex_path="$(detect_platform_codex || true)"
   if [[ -n "$codex_path" ]]; then
-    echo "ok   OpenAI extension Codex CLI: $codex_path"
+    echo "ok   OpenAI extension Codex binary: $codex_path"
   else
-    echo "miss command: codex"
+    echo "miss Codex: install the OpenAI/Codex VSCode extension or set texor.codexExecutable"
   fi
 fi
 

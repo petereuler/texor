@@ -11,6 +11,7 @@ import {
 
 const dataDir = dataPath();
 const feedbackFile = dataPath('feedback.json');
+let mutationQueue: Promise<unknown> = Promise.resolve();
 
 async function ensureStore(): Promise<void> {
   await fs.mkdir(dataDir, { recursive: true });
@@ -18,7 +19,7 @@ async function ensureStore(): Promise<void> {
     await fs.access(feedbackFile);
   } catch {
     const initialState: FeedbackStoreState = { feedback: {} };
-    await fs.writeFile(feedbackFile, JSON.stringify(initialState, null, 2));
+    await saveState(initialState);
   }
 }
 
@@ -29,8 +30,24 @@ async function loadState(): Promise<FeedbackStoreState> {
 }
 
 async function saveState(state: FeedbackStoreState): Promise<void> {
-  await ensureStore();
-  await fs.writeFile(feedbackFile, JSON.stringify(state, null, 2));
+  await fs.mkdir(dataDir, { recursive: true });
+  const tempFile = path.join(
+    dataDir,
+    `.${path.basename(feedbackFile)}.${process.pid}.${Date.now()}.${crypto.randomUUID()}.tmp`,
+  );
+  await fs.writeFile(tempFile, JSON.stringify(state, null, 2));
+  await fs.rename(tempFile, feedbackFile);
+}
+
+async function mutateState<T>(mutator: (state: FeedbackStoreState) => T | Promise<T>): Promise<T> {
+  const operation = mutationQueue.then(async () => {
+    const state = await loadState();
+    const result = await mutator(state);
+    await saveState(state);
+    return result;
+  });
+  mutationQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 function nowIso(): string {
@@ -38,28 +55,29 @@ function nowIso(): string {
 }
 
 export async function createFeedback(request: CodexFeedbackCreateRequest): Promise<CodexFeedback> {
-  const state = await loadState();
-  const createdAt = nowIso();
-  const feedback: CodexFeedback = {
-    id: crypto.randomUUID(),
-    paperId: request.paperId,
-    versionId: request.versionId,
-    targetBlockId: request.targetBlockId,
-    selectedText: request.selectedText,
-    sourceFile: request.sourceFile,
-    sourceLine: request.sourceLine,
-    sourceSnippet: request.sourceSnippet,
-    issue: request.issue,
-    changeRequest: request.changeRequest,
-    source: request.source || 'texor-web',
-    status: 'open',
-    createdAt,
-    updatedAt: createdAt,
-  };
+  return mutateState((state) => {
+    const createdAt = nowIso();
+    const feedback: CodexFeedback = {
+      id: crypto.randomUUID(),
+      paperId: request.paperId,
+      versionId: request.versionId,
+      targetBlockId: request.targetBlockId,
+      selectedText: request.selectedText,
+      sourceFile: request.sourceFile,
+      sourceLine: request.sourceLine,
+      sourceSnippet: request.sourceSnippet,
+      issue: request.issue,
+      changeRequest: request.changeRequest,
+      source: request.source || 'texor-web',
+      taskSpeedMode: request.taskSpeedMode,
+      status: 'open',
+      createdAt,
+      updatedAt: createdAt,
+    };
 
-  state.feedback[feedback.id] = feedback;
-  await saveState(state);
-  return feedback;
+    state.feedback[feedback.id] = feedback;
+    return feedback;
+  });
 }
 
 export async function listFeedback(options: {
@@ -82,32 +100,32 @@ export async function updateFeedbackStatus(
   feedbackId: string,
   status: CodexFeedbackStatus,
 ): Promise<CodexFeedback | null> {
-  const state = await loadState();
-  const feedback = state.feedback[feedbackId];
-  if (!feedback) {
-    return null;
-  }
+  return mutateState((state) => {
+    const feedback = state.feedback[feedbackId];
+    if (!feedback) {
+      return null;
+    }
 
-  const updated: CodexFeedback = {
-    ...feedback,
-    status,
-    updatedAt: nowIso(),
-  };
-  state.feedback[feedbackId] = updated;
-  await saveState(state);
-  return updated;
+    const updated: CodexFeedback = {
+      ...feedback,
+      status,
+      updatedAt: nowIso(),
+    };
+    state.feedback[feedbackId] = updated;
+    return updated;
+  });
 }
 
 export async function deleteFeedbackForPapers(paperIds: string[]): Promise<number> {
   const paperIdSet = new Set(paperIds);
-  const state = await loadState();
-  let deleted = 0;
-  for (const [feedbackId, feedback] of Object.entries(state.feedback)) {
-    if (paperIdSet.has(feedback.paperId)) {
-      delete state.feedback[feedbackId];
-      deleted += 1;
+  return mutateState((state) => {
+    let deleted = 0;
+    for (const [feedbackId, feedback] of Object.entries(state.feedback)) {
+      if (paperIdSet.has(feedback.paperId)) {
+        delete state.feedback[feedbackId];
+        deleted += 1;
+      }
     }
-  }
-  await saveState(state);
-  return deleted;
+    return deleted;
+  });
 }

@@ -5,10 +5,15 @@
     "publisher": "IEEE",
     "type": "journal",
     "templateFamily": "IEEEtran TIM",
+    "sourceProvider": "ieee",
+    "sourceKind": "hybrid",
     "localPath": "templates/packages/ieee-tim/IEEEtran",
     "archivePath": "templates/archives/IEEEtran.zip",
     "sourceUrl": "https://template-selector.ieee.org/",
     "officialPage": "https://ieee-ims.org/publication/ieee-tim/tim-paper-templates",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/IEEEtran.zip"
+    ],
     "aliases": [
       "TIM",
       "IEEE TIM",
@@ -24,10 +29,15 @@
     "publisher": "IEEE",
     "type": "journal",
     "templateFamily": "IEEEtran",
+    "sourceProvider": "ieee",
+    "sourceKind": "hybrid",
     "localPath": "templates/packages/ieee-article/IEEEtran",
     "archivePath": "templates/archives/IEEEtran.zip",
     "sourceUrl": "https://mirrors.ctan.org/macros/latex/contrib/IEEEtran.zip",
     "officialPage": "https://journals.ieeeauthorcenter.ieee.org/create-your-ieee-journal-article/authoring-tools-and-templates/tools-for-ieee-authors/ieee-article-templates/",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/IEEEtran.zip"
+    ],
     "aliases": [
       "IEEE Transactions on Aerospace and Electronic Systems",
       "IEEE Transactions on Affective Computing",
@@ -98,6 +108,8 @@
       "IEEE Transactions on Terahertz Science and Technology",
       "IEEE Transactions on Transportation Electrification",
       "IEEE Transactions on Vehicular Technology",
+      "IEEE Transactions on Wireless Communications",
+      "TWC",
       "IEEE Transactions on Visualization and Computer Graphics",
       "TVCG",
       "IEEE Journal of Selected Topics in Signal Processing",
@@ -111,10 +123,15 @@
     "publisher": "IEEE",
     "type": "conference",
     "templateFamily": "IEEEtran",
+    "sourceProvider": "ieee",
+    "sourceKind": "hybrid",
     "localPath": "templates/packages/ieee-article/IEEEtran",
     "archivePath": "templates/archives/IEEEtran.zip",
     "sourceUrl": "https://mirrors.ctan.org/macros/latex/contrib/IEEEtran.zip",
     "officialPage": "https://template-selector.ieee.org/",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/IEEEtran.zip"
+    ],
     "aliases": [
       "IEEE Conference",
       "IEEE International Conference",
@@ -131,10 +148,15 @@
     "publisher": "ACM",
     "type": "journal-conference",
     "templateFamily": "acmart",
+    "sourceProvider": "acm",
+    "sourceKind": "official-page",
     "localPath": "templates/packages/acm-acmart/acmart",
     "archivePath": "templates/archives/acmart.zip",
-    "sourceUrl": "https://mirrors.ctan.org/macros/latex/contrib/acmart.zip",
+    "sourceUrl": "https://authors.acm.org/proceedings/production-information/preparing-your-article-with-latex",
     "officialPage": "https://authors.acm.org/proceedings/production-information/preparing-your-article-with-latex",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/acmart.zip"
+    ],
     "aliases": [
       "ACM Conference",
       "ACM SIG Conference",
@@ -157,10 +179,15 @@
     "publisher": "Elsevier",
     "type": "journal",
     "templateFamily": "elsarticle",
+    "sourceProvider": "elsevier",
+    "sourceKind": "official-page",
     "localPath": "templates/packages/elsevier-elsarticle/elsarticle",
     "archivePath": "templates/archives/elsarticle.zip",
-    "sourceUrl": "https://mirrors.ctan.org/macros/latex/contrib/elsarticle.zip",
+    "sourceUrl": "https://www.elsevier.com/researcher/author/tools-and-resources/latex-instructions",
     "officialPage": "https://www.elsevier.com/researcher/author/tools-and-resources/latex-instructions",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/elsarticle.zip"
+    ],
     "aliases": [
       "Elsevier Journal",
       "Information Sciences",
@@ -180,10 +207,15 @@
     "publisher": "Elsevier",
     "type": "journal",
     "templateFamily": "cas-sc/cas-dc",
+    "sourceProvider": "elsevier",
+    "sourceKind": "official-page",
     "localPath": "templates/packages/elsevier-cas/els-cas-templates",
     "archivePath": "templates/archives/els-cas-templates.zip",
-    "sourceUrl": "https://mirrors.ctan.org/macros/latex/contrib/els-cas-templates.zip",
+    "sourceUrl": "https://www.elsevier.com/researcher/author/tools-and-resources/latex-instructions",
     "officialPage": "https://www.elsevier.com/researcher/author/tools-and-resources/latex-instructions",
+    "fallbackUrls": [
+      "https://mirrors.ctan.org/macros/latex/contrib/els-cas-templates.zip"
+    ],
     "aliases": [
       "Computer Methods in Applied Mechanics and Engineering",
       "Applied Soft Computing",
@@ -200,6 +232,8 @@
     "publisher": "ICLR",
     "type": "conference",
     "templateFamily": "iclr2026",
+    "sourceProvider": "iclr",
+    "sourceKind": "direct-archive",
     "localPath": "templates/packages/iclr-2026/iclr2026",
     "archivePath": "templates/archives/iclr2026.zip",
     "sourceUrl": "https://github.com/ICLR/Master-Template/raw/master/iclr2026.zip",
@@ -216,10 +250,15 @@
     "publisher": "NeurIPS",
     "type": "conference",
     "templateFamily": "neurips",
+    "sourceProvider": "neurips",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://neurips.cc/Conferences/2025/PaperInformation/StyleFiles",
     "officialPage": "https://neurips.cc/",
+    "fallbackUrls": [
+      "https://media.neurips.cc/Conferences/NeurIPS2025/Styles.zip"
+    ],
     "aliases": [
       "NeurIPS",
       "Neural Information Processing Systems",
@@ -232,10 +271,15 @@
     "publisher": "CVF",
     "type": "conference",
     "templateFamily": "cvpr",
+    "sourceProvider": "cvf",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://cvpr.thecvf.com/",
     "officialPage": "https://cvpr.thecvf.com/",
+    "fallbackUrls": [
+      "https://github.com/cvpr-org/author-kit/archive/refs/tags/CVPR2026-v1%28latex%29.zip"
+    ],
     "aliases": [
       "CVPR",
       "IEEE/CVF Conference on Computer Vision and Pattern Recognition",
@@ -248,10 +292,15 @@
     "publisher": "ICML",
     "type": "conference",
     "templateFamily": "icml",
+    "sourceProvider": "icml",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://icml.cc/",
     "officialPage": "https://icml.cc/",
+    "fallbackUrls": [
+      "https://media.icml.cc/Conferences/ICML2026/Styles/icml2026.zip"
+    ],
     "aliases": [
       "ICML",
       "International Conference on Machine Learning"
@@ -263,6 +312,8 @@
     "publisher": "AAAI",
     "type": "conference",
     "templateFamily": "aaai",
+    "sourceProvider": "aaai",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://aaai.org/conference/aaai/",
@@ -278,10 +329,16 @@
     "publisher": "Springer Nature",
     "type": "journal",
     "templateFamily": "sn-jnl",
+    "sourceProvider": "springer",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://www.springernature.com/gp/authors/campaigns/latex-author-support",
     "officialPage": "https://www.springernature.com/gp/authors/campaigns/latex-author-support",
+    "fallbackUrls": [
+      "https://cms-resources.apps.public.k8s.springernature.io/springer-cms/rest/v1/content/18782940/data/v12",
+      "https://resource-cms.springernature.com/springer-cms/rest/v1/content/19238648/data/v13"
+    ],
     "aliases": [
       "Springer Nature",
       "Nature Portfolio",
@@ -298,10 +355,16 @@
     "publisher": "Springer",
     "type": "conference",
     "templateFamily": "llncs",
+    "sourceProvider": "springer",
+    "sourceKind": "official-page",
     "localPath": "",
     "archivePath": "",
     "sourceUrl": "https://www.springer.com/gp/computer-science/lncs/conference-proceedings-guidelines",
     "officialPage": "https://www.springer.com/gp/computer-science/lncs/conference-proceedings-guidelines",
+    "fallbackUrls": [
+      "https://cms-resources.apps.public.k8s.springernature.io/springer-cms/rest/v1/content/18782940/data/v12",
+      "https://resource-cms.springernature.com/springer-cms/rest/v1/content/19238648/data/v13"
+    ],
     "aliases": [
       "Springer LNCS",
       "Lecture Notes in Computer Science",

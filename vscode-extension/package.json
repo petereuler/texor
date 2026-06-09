@@ -1,12 +1,15 @@
 {
   "name": "texor",
   "displayName": "TEXOR Workbench",
-  "description": "Open the TEXOR browser workbench from VSCode and revise LaTeX manuscripts through PDF feedback with TEXOR Agent or Codex CLI.",
-  "version": "0.2.4",
+  "description": "Open the TEXOR browser workbench from VSCode and revise LaTeX manuscripts through PDF feedback with TEXOR Agent, Codex CLI, or Claude Code.",
+  "version": "0.3.4",
   "publisher": "texor",
   "engines": {
     "vscode": "^1.107.0"
   },
+  "extensionKind": [
+    "workspace"
+  ],
   "categories": [
     "Other"
   ],
@@ -28,6 +31,12 @@
     "onStartupFinished",
     "onCommand:texor.open"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "You can open the TEXOR browser workbench in restricted mode, but project automation works best after trusting the workspace."
+    }
+  },
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
@@ -63,6 +72,27 @@
           "type": "string",
           "default": "codex",
           "description": "Codex CLI executable used for browser-submitted tasks."
+        },
+        "texor.codexModel": {
+          "type": "string",
+          "default": "gpt-5.4",
+          "description": "Default Codex model used for browser-submitted tasks."
+        },
+        "texor.codexReasoningEffort": {
+          "type": "string",
+          "default": "xhigh",
+          "enum": ["minimal", "low", "medium", "high", "xhigh"],
+          "description": "Default Codex reasoning effort used for browser-submitted tasks."
+        },
+        "texor.claudeExecutable": {
+          "type": "string",
+          "default": "claude",
+          "description": "Claude Code CLI executable used for browser-submitted tasks."
+        },
+        "texor.claudeModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Claude model override passed to Claude Code."
         },
         "texor.agentProvider": {
           "type": "string",

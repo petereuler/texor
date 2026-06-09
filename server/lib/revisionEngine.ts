@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import { PaperBlock, PaperRecord, PaperVersion, RevisionRequest, RevisionResult, WorkspaceSnapshot } from '../types.js';
+import { ManuscriptAsset, ManuscriptRegion, ManuscriptState, ManuscriptTodo, PaperBlock, PaperRecord, PaperVersion, RevisionRequest, RevisionResult, VersionFocusTarget, WorkspaceSnapshot } from '../types.js';
 import { appendVersion } from './versionStore.js';
 import { composeLatex } from './paperBuilder.js';
 import { callOpenAICompatible } from './modelClient.js';
@@ -10,8 +10,22 @@ interface ModelResponse {
   content: string;
 }
 
+type RevisionRoute = 'quick-local' | 'structured-patch' | 'codex';
+
+interface RevisionRegionPlan {
+  primaryRegion?: ManuscriptRegion;
+  relatedRegions: ManuscriptRegion[];
+  relevantTodos: ManuscriptTodo[];
+  relevantAssets: ManuscriptAsset[];
+  scopeAdvice: string[];
+}
+
 function compactContent(content: string): string {
   return content.replace(/\s+/g, ' ').trim();
+}
+
+function compactWhitespace(content: string): string {
+  return content.replace(/\r/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function isFullLatexDocument(latex: string): boolean {
@@ -66,6 +80,23 @@ function lineWindow(content: string, line?: number, radius = 4): { start: number
   const start = offsets[startLine] ?? 0;
   const end = endLine >= lines.length ? content.length : offsets[endLine] ?? content.length;
   return { start, end, text: content.slice(start, end) };
+}
+
+function lineNumberForOffset(content: string, offset: number): number {
+  const safeOffset = Math.max(0, Math.min(content.length, offset));
+  let line = 1;
+  for (let index = 0; index < safeOffset; index += 1) {
+    if (content[index] === '\n') {
+      line += 1;
+    }
+  }
+  return line;
+}
+
+function columnNumberForOffset(content: string, offset: number): number {
+  const safeOffset = Math.max(0, Math.min(content.length, offset));
+  const lineStart = content.lastIndexOf('\n', Math.max(0, safeOffset - 1));
+  return Math.max(1, safeOffset - lineStart);
 }
 
 function locateSelectedLatexSpan(latex: string, request: RevisionRequest): { start: number; end: number; text: string; confidence: 'text' | 'line' } | null {
@@ -144,6 +175,20 @@ function locateSelectedLatexSpan(latex: string, request: RevisionRequest): { sta
   }
 
   return null;
+}
+
+function focusTargetFromRequest(request: RevisionRequest, fallback?: Partial<VersionFocusTarget>): VersionFocusTarget | undefined {
+  if (!request.sourceFile && !request.sourceLine && !request.selectedText && !fallback?.regionTitle && !fallback?.selectedText) {
+    return fallback && Object.values(fallback).some(Boolean) ? { ...fallback } : undefined;
+  }
+  return {
+    sourceFile: request.sourceFile || fallback?.sourceFile,
+    sourceLine: request.sourceLine || fallback?.sourceLine,
+    sourceColumn: request.sourceColumn || fallback?.sourceColumn,
+    selectedText: normalizePdfSelectedText(request.selectedText) || fallback?.selectedText,
+    pageHint: fallback?.pageHint,
+    regionTitle: fallback?.regionTitle,
+  };
 }
 
 function looksLikeSimpleWordingRequest(request: RevisionRequest): boolean {
@@ -229,6 +274,21 @@ function validateReplacement(original: string, replacement: string): string {
   return trimmed;
 }
 
+function looksLikeFullBlockRewrite(original: string, replacement: string): boolean {
+  const normalizedOriginal = compactWhitespace(original);
+  const normalizedReplacement = compactWhitespace(replacement);
+  if (!normalizedOriginal || !normalizedReplacement) {
+    return false;
+  }
+  if (normalizedOriginal === normalizedReplacement) {
+    return false;
+  }
+  return (
+    normalizedReplacement.includes(normalizedOriginal.slice(0, Math.min(120, normalizedOriginal.length))) &&
+    normalizedReplacement.length > normalizedOriginal.length * 1.8
+  );
+}
+
 async function quickReviseFullLatex(targetVersion: PaperVersion, request: RevisionRequest): Promise<{ latex: string; mode: ModelResponse['mode'] } | null> {
   const sourcePath = request.sourceFile || targetVersion.sourcePath;
   const latexForSearch = sourcePath ? await fs.readFile(sourcePath, 'utf8').catch(() => targetVersion.latex) : targetVersion.latex;
@@ -245,19 +305,337 @@ async function quickReviseFullLatex(targetVersion: PaperVersion, request: Revisi
   return { latex: revisedLatex, mode: modelResponse.mode };
 }
 
-function buildPrompt(block: PaperBlock, request: RevisionRequest): string {
+function locateSelectedTextInBlock(content: string, request: RevisionRequest): { start: number; end: number; text: string } | null {
+  const selectedText = normalizePdfSelectedText(request.selectedText);
+  const searchCandidates = [
+    selectedText,
+    request.sourceSnippet?.trim(),
+  ].filter((entry): entry is string => Boolean(entry && entry.trim()));
+
+  for (const candidate of searchCandidates) {
+    const exactIndex = content.indexOf(candidate);
+    if (exactIndex >= 0) {
+      return {
+        start: exactIndex,
+        end: exactIndex + candidate.length,
+        text: content.slice(exactIndex, exactIndex + candidate.length),
+      };
+    }
+    const fuzzyRegex = buildFuzzyTextRegex(candidate);
+    const match = fuzzyRegex ? content.match(fuzzyRegex) : null;
+    if (match?.index !== undefined) {
+      return {
+        start: match.index,
+        end: match.index + match[0].length,
+        text: match[0],
+      };
+    }
+  }
+
+  return null;
+}
+
+async function rewriteSelectedBlockSpan(original: string, request: RevisionRequest, block: PaperBlock): Promise<ModelResponse> {
+  const response = await callOpenAICompatible(
+    [
+      {
+        role: 'system',
+        content:
+          'You are revising one selected span inside a manuscript block. Return only the replacement text for that span. Preserve meaning, citations, LaTeX commands, math, labels, and surrounding structure. Do not return the full block. Do not explain.',
+      },
+      {
+        role: 'user',
+        content: [
+          `Block type: ${block.type}`,
+          'Selected block span:',
+          original,
+          '',
+          'User revision request:',
+          request.changeRequest || request.issue,
+        ].join('\n'),
+      },
+    ],
+    request.modelConfig,
+    0.2,
+  );
+  return response || mockQuickRewrite(original, {
+    ...request,
+    changeRequest: request.changeRequest || request.issue,
+  });
+}
+
+async function patchTextBlock(
+  block: Extract<PaperBlock, { type: 'text' }>,
+  request: RevisionRequest,
+): Promise<{ nextBlock: Extract<PaperBlock, { type: 'text' }>; mode: ModelResponse['mode'] } | null> {
+  const span = locateSelectedTextInBlock(block.content, request);
+  if (!span) {
+    return null;
+  }
+  const modelResponse = await rewriteSelectedBlockSpan(span.text, request, block);
+  const replacement = validateReplacement(span.text, modelResponse.content);
+  if (looksLikeFullBlockRewrite(span.text, replacement)) {
+    throw new Error('Structured text revision returned an oversized replacement for the selected span.');
+  }
+  const revisedContent = `${block.content.slice(0, span.start)}${replacement}${block.content.slice(span.end)}`;
+  return {
+    nextBlock: {
+      ...block,
+      content: revisedContent,
+    },
+    mode: modelResponse.mode,
+  };
+}
+
+function normalizeRevisionText(request: RevisionRequest): string {
+  return `${request.issue}\n${request.changeRequest}\n${request.selectedText || ''}`.toLowerCase();
+}
+
+function regionTitleKey(region?: Pick<ManuscriptRegion, 'title'>): string {
+  return compactContent(region?.title || '').toLowerCase();
+}
+
+function findRegionByLine(state: ManuscriptState | undefined, line?: number): ManuscriptRegion | undefined {
+  if (!state || !line) {
+    return undefined;
+  }
+  return state.sectionMap.find((region) => region.lineStart <= line && region.lineEnd >= line);
+}
+
+function findRegionByBlock(state: ManuscriptState | undefined, block: PaperBlock): ManuscriptRegion | undefined {
+  if (!state) {
+    return undefined;
+  }
+  const titleCandidates = [block.section, block.title]
+    .map((entry) => compactContent(entry).toLowerCase())
+    .filter(Boolean);
+  return state.sectionMap.find((region) => {
+    const title = compactContent(region.title).toLowerCase();
+    return titleCandidates.some((candidate) => title === candidate || title.includes(candidate) || candidate.includes(title));
+  });
+}
+
+function findRegionsMatchingTerms(state: ManuscriptState | undefined, terms: string[]): ManuscriptRegion[] {
+  if (!state || terms.length === 0) {
+    return [];
+  }
+  return state.sectionMap.filter((region) => {
+    const title = compactContent(region.title).toLowerCase();
+    return terms.some((term) => title.includes(term));
+  });
+}
+
+function inferRequestRegionTerms(text: string): string[] {
+  const regionTerms = new Set<string>();
+  const mappings: Array<{ signals: string[]; terms: string[] }> = [
+    { signals: ['abstract', '摘要'], terms: ['abstract'] },
+    { signals: ['introduction', '引言', 'motivation', 'background'], terms: ['introduction', 'background'] },
+    { signals: ['related work', '文献综述', 'references', 'citation', '参考文献', '引用'], terms: ['related work', 'reference', 'bibliography'] },
+    { signals: ['method', 'approach', '方法', '模型', '架构'], terms: ['method', 'approach'] },
+    { signals: ['experiment', '实验', 'setup', 'benchmark', 'dataset'], terms: ['experiment', 'setup'] },
+    { signals: ['result', 'results', '结果', 'ablation', 'discussion', 'analysis'], terms: ['result', 'discussion', 'analysis'] },
+    { signals: ['conclusion', '结论', 'future work'], terms: ['conclusion'] },
+  ];
+  for (const mapping of mappings) {
+    if (mapping.signals.some((signal) => text.includes(signal))) {
+      mapping.terms.forEach((term) => regionTerms.add(term));
+    }
+  }
+  return [...regionTerms];
+}
+
+function dedupeRegions(regions: ManuscriptRegion[], primary?: ManuscriptRegion): ManuscriptRegion[] {
+  const primaryKey = primary ? regionTitleKey(primary) : '';
+  const seen = new Set<string>();
+  const unique: ManuscriptRegion[] = [];
+  for (const region of regions) {
+    const key = regionTitleKey(region);
+    if (!key || key === primaryKey || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(region);
+  }
+  return unique;
+}
+
+function inferRelatedRegions(
+  state: ManuscriptState | undefined,
+  block: PaperBlock,
+  primaryRegion: ManuscriptRegion | undefined,
+  requestText: string,
+): ManuscriptRegion[] {
+  if (!state) {
+    return [];
+  }
+  const terms = new Set<string>();
+  const primaryTitle = regionTitleKey(primaryRegion);
+  if (primaryTitle.includes('abstract')) {
+    ['introduction', 'conclusion', 'result'].forEach((term) => terms.add(term));
+  }
+  if (primaryTitle.includes('introduction')) {
+    ['abstract', 'conclusion'].forEach((term) => terms.add(term));
+  }
+  if (primaryTitle.includes('method') || primaryTitle.includes('approach')) {
+    ['abstract', 'experiment', 'result'].forEach((term) => terms.add(term));
+  }
+  if (primaryTitle.includes('experiment') || primaryTitle.includes('result') || primaryTitle.includes('discussion') || primaryTitle.includes('analysis')) {
+    ['abstract', 'conclusion', 'method'].forEach((term) => terms.add(term));
+  }
+  if (primaryTitle.includes('conclusion')) {
+    ['abstract', 'introduction', 'result'].forEach((term) => terms.add(term));
+  }
+  if (primaryTitle.includes('related work') || primaryTitle.includes('bibliography') || primaryTitle.includes('reference')) {
+    ['introduction', 'bibliography'].forEach((term) => terms.add(term));
+  }
+  if (block.type === 'figure' || block.type === 'table') {
+    ['result', 'experiment', 'method'].forEach((term) => terms.add(term));
+  }
+  if (/(全文|全篇|一致性|overall|consistency|across sections)/i.test(requestText)) {
+    ['abstract', 'introduction', 'conclusion'].forEach((term) => terms.add(term));
+  }
+  return dedupeRegions(findRegionsMatchingTerms(state, [...terms]), primaryRegion).slice(0, 5);
+}
+
+function relevantTodosForPlan(state: ManuscriptState | undefined, primaryRegion: ManuscriptRegion | undefined, relatedRegions: ManuscriptRegion[]): ManuscriptTodo[] {
+  if (!state) {
+    return [];
+  }
+  const titles = new Set(
+    [primaryRegion, ...relatedRegions]
+      .map((region) => regionTitleKey(region))
+      .filter(Boolean),
+  );
+  return state.todos
+    .filter((todo) => {
+      const todoTitle = compactContent(todo.regionTitle || '').toLowerCase();
+      return titles.size === 0 ? todo.kind !== 'todo' : titles.has(todoTitle);
+    })
+    .slice(0, 4);
+}
+
+function assetMatchesRegion(asset: ManuscriptAsset, region?: ManuscriptRegion): boolean {
+  return Boolean(
+    region &&
+      typeof asset.line === 'number' &&
+      asset.line >= region.lineStart &&
+      asset.line <= region.lineEnd,
+  );
+}
+
+function formatAssetPlanLabel(asset: ManuscriptAsset): string {
+  const label = asset.label || asset.kind;
+  const targetPath = asset.assetPath || asset.assetPaths?.[0] || asset.missingAssetPaths?.[0] || '';
+  return `${label}${targetPath ? ` -> ${targetPath}` : ''}${asset.assetExists === false ? ' (missing)' : ''}`;
+}
+
+function relevantAssetsForPlan(
+  state: ManuscriptState | undefined,
+  primaryRegion: ManuscriptRegion | undefined,
+  relatedRegions: ManuscriptRegion[],
+  block: PaperBlock,
+): ManuscriptAsset[] {
+  if (!state) {
+    return [];
+  }
+  const assets = [...state.figures, ...state.tables];
+  return [...assets]
+    .filter((asset) => {
+      if (assetMatchesRegion(asset, primaryRegion) || relatedRegions.some((region) => assetMatchesRegion(asset, region))) {
+        return true;
+      }
+      if (block.type === 'figure' && asset.kind === 'figure') {
+        return asset.assetExists === false;
+      }
+      if (block.type === 'table' && asset.kind === 'table') {
+        return asset.assetExists === false;
+      }
+      return false;
+    })
+    .sort((left, right) => Number(right.assetExists === false) - Number(left.assetExists === false) || left.line - right.line)
+    .slice(0, 4);
+}
+
+function scopeAdviceForPlan(
+  block: PaperBlock,
+  primaryRegion: ManuscriptRegion | undefined,
+  relatedRegions: ManuscriptRegion[],
+  todos: ManuscriptTodo[],
+  assets: ManuscriptAsset[],
+): string[] {
+  const advice = [
+    primaryRegion
+      ? `Edit the primary manuscript region first: ${primaryRegion.title} (lines ${primaryRegion.lineStart}-${primaryRegion.lineEnd}).`
+      : 'No primary manuscript region was resolved, so keep the change narrowly scoped to the provided block.',
+  ];
+  if (relatedRegions.length > 0) {
+    advice.push(`If terminology, claims, or numbers shift, only mirror the minimum consistency edits in: ${relatedRegions.map((region) => region.title).join(', ')}.`);
+  }
+  if (block.type === 'figure' || block.type === 'table') {
+    advice.push('When revising a figure/table block, keep caption language aligned with any in-text references and surrounding result discussion.');
+  }
+  if (assets.length > 0) {
+    advice.push(`Preserve alignment with linked manuscript assets: ${assets.map((asset) => formatAssetPlanLabel(asset)).join('; ')}.`);
+  }
+  if (todos.length > 0) {
+    advice.push('Do not erase listed open evidence gaps unless the revision truly resolves them with grounded content.');
+  }
+  return advice;
+}
+
+function buildRevisionRegionPlan(snapshot: WorkspaceSnapshot, targetVersion: PaperVersion, block: PaperBlock, request: RevisionRequest): RevisionRegionPlan {
+  const state = targetVersion.manuscriptState || snapshot.currentVersion.manuscriptState;
+  const requestText = normalizeRevisionText(request);
+  const primaryRegion =
+    findRegionByLine(state, request.sourceLine) ||
+    findRegionByBlock(state, block) ||
+    findRegionsMatchingTerms(state, inferRequestRegionTerms(requestText))[0];
+  const relatedRegions = inferRelatedRegions(state, block, primaryRegion, requestText);
+  const relevantTodos = relevantTodosForPlan(state, primaryRegion, relatedRegions);
+  const relevantAssets = relevantAssetsForPlan(state, primaryRegion, relatedRegions, block);
+  return {
+    primaryRegion,
+    relatedRegions,
+    relevantTodos,
+    relevantAssets,
+    scopeAdvice: scopeAdviceForPlan(block, primaryRegion, relatedRegions, relevantTodos, relevantAssets),
+  };
+}
+
+function formatRevisionRegionPlan(plan: RevisionRegionPlan): string {
+  return [
+    plan.primaryRegion
+      ? `Primary region: ${plan.primaryRegion.title} (lines ${plan.primaryRegion.lineStart}-${plan.primaryRegion.lineEnd})`
+      : 'Primary region: unresolved from manuscript state; stay scoped to the target block.',
+    plan.relatedRegions.length > 0
+      ? `Related consistency regions: ${plan.relatedRegions.map((region) => `${region.title} [${region.lineStart}-${region.lineEnd}]`).join('; ')}`
+      : 'Related consistency regions: none strongly indicated.',
+    plan.relevantTodos.length > 0
+      ? `Open items near these regions: ${plan.relevantTodos.map((todo) => `${todo.kind} @ line ${todo.line}: ${todo.text}`).join(' ; ')}`
+      : 'Open items near these regions: none currently flagged.',
+    plan.relevantAssets.length > 0
+      ? `Linked assets in scope: ${plan.relevantAssets.map((asset) => formatAssetPlanLabel(asset)).join('; ')}`
+      : 'Linked assets in scope: none strongly indicated.',
+    `Scope guidance: ${plan.scopeAdvice.join(' ')}`,
+  ].join('\n');
+}
+
+function buildPrompt(snapshot: WorkspaceSnapshot, targetVersion: PaperVersion, block: PaperBlock, request: RevisionRequest): string {
   const targetContext =
     block.type === 'text'
       ? block.content
       : block.type === 'figure'
         ? `${block.title}\n${block.caption}\n${block.insight}`
         : `${block.title}\n${block.caption}\n${block.headers.join(' | ')}\n${block.rows.map((row) => row.join(' | ')).join('\n')}`;
+  const plan = buildRevisionRegionPlan(snapshot, targetVersion, block, request);
 
   return [
     `Block type: ${block.type}`,
     `Selected text: ${request.selectedText || 'N/A'}`,
     `Issue: ${request.issue}`,
     `Requested change: ${request.changeRequest}`,
+    'Revision region plan:',
+    formatRevisionRegionPlan(plan),
     'Current block content:',
     targetContext,
   ].join('\n');
@@ -296,11 +674,27 @@ function mockReviseBlock(block: PaperBlock, request: RevisionRequest): ModelResp
   };
 }
 
+function validateTextBlockRewrite(original: string, revised: string): string {
+  const trimmed = revised.trim();
+  if (!trimmed) {
+    throw new Error('Structured revision produced an empty text block.');
+  }
+  if (isFullLatexDocument(trimmed)) {
+    throw new Error('Structured revision returned a full document instead of a block update.');
+  }
+  const originalLength = compactWhitespace(original).length;
+  const revisedLength = compactWhitespace(trimmed).length;
+  if (originalLength > 180 && revisedLength > originalLength * 2.6) {
+    throw new Error('Structured revision expanded too much for a single manuscript block.');
+  }
+  return trimmed;
+}
+
 function applyStructuredRevision(block: PaperBlock, modelResponse: ModelResponse): PaperBlock {
   if (block.type === 'text') {
     return {
       ...block,
-      content: modelResponse.content,
+      content: validateTextBlockRewrite(block.content, modelResponse.content),
     };
   }
 
@@ -344,6 +738,15 @@ export async function reviseWorkspace(
   request: RevisionRequest,
 ): Promise<RevisionResult> {
   const targetVersion = snapshot.versions.find((version) => version.id === request.versionId) || snapshot.currentVersion;
+  const selectedSpan = locateSelectedLatexSpan(targetVersion.latex, request);
+  const requestFocusTarget = focusTargetFromRequest(request, selectedSpan
+    ? {
+        sourceFile: request.sourceFile || targetVersion.sourcePath,
+        sourceLine: request.sourceLine || lineNumberForOffset(targetVersion.latex, selectedSpan.start),
+        sourceColumn: request.sourceColumn || columnNumberForOffset(targetVersion.latex, selectedSpan.start),
+        selectedText: selectedSpan.text,
+      }
+    : undefined);
 
   if (isFullLatexDocument(targetVersion.latex) && looksLikeSimpleWordingRequest(request)) {
     const quickRevision = await quickReviseFullLatex(targetVersion, request);
@@ -357,6 +760,7 @@ export async function reviseWorkspace(
         basedOnVersionId: targetVersion.id,
         sourceCommit: snapshot.paper.analysis?.gitContext.head,
         sourcePath: request.sourceFile || targetVersion.sourcePath,
+        focusTarget: requestFocusTarget,
         blocks: [
           {
             id: crypto.randomUUID(),
@@ -371,7 +775,7 @@ export async function reviseWorkspace(
       const nextSnapshot = await appendVersion(snapshot.paper as PaperRecord, nextVersion);
       return {
         snapshot: nextSnapshot,
-        diffSummary: `Quick local revision based on ${targetVersion.label}.`,
+        diffSummary: nextSnapshot.currentVersion.changeSummary?.summary || `Quick local revision based on ${targetVersion.label}.`,
         mode: quickRevision.mode,
         route: 'quick-local',
       };
@@ -383,7 +787,35 @@ export async function reviseWorkspace(
     throw new Error('Target block not found.');
   }
 
-  const prompt = buildPrompt(targetBlock, request);
+  if (targetBlock.type === 'text' && looksLikeSimpleWordingRequest(request)) {
+    const patched = await patchTextBlock(targetBlock, request);
+    if (patched) {
+      const revisedBlocks = targetVersion.blocks.map((block) =>
+        block.id === targetBlock.id ? patched.nextBlock : block,
+      );
+      const nextVersion: PaperVersion = {
+        id: crypto.randomUUID(),
+        paperId: snapshot.paper.id,
+        label: `v${snapshot.versions.length + 1}`,
+        summary: `Structured patch revision: ${request.changeRequest || request.issue}`,
+        createdAt: new Date().toISOString(),
+        basedOnVersionId: targetVersion.id,
+        sourceCommit: snapshot.paper.analysis?.gitContext.head,
+        focusTarget: requestFocusTarget,
+        blocks: revisedBlocks,
+        latex: await composeLatex(snapshot.paper, revisedBlocks),
+      };
+      const nextSnapshot = await appendVersion(snapshot.paper as PaperRecord, nextVersion);
+      return {
+        snapshot: nextSnapshot,
+        diffSummary: nextSnapshot.currentVersion.changeSummary?.summary || `Structured local patch on ${targetBlock.title}.`,
+        mode: patched.mode,
+        route: 'structured-patch',
+      };
+    }
+  }
+
+  const prompt = buildPrompt(snapshot, targetVersion, targetBlock, request);
   let modelResponse: ModelResponse | null = await callOpenAICompatible(
     [
       {
@@ -414,6 +846,7 @@ export async function reviseWorkspace(
     createdAt: new Date().toISOString(),
     basedOnVersionId: targetVersion.id,
     sourceCommit: snapshot.paper.analysis?.gitContext.head,
+    focusTarget: requestFocusTarget,
     blocks: revisedBlocks,
     latex: await composeLatex(snapshot.paper, revisedBlocks),
   };
@@ -421,8 +854,8 @@ export async function reviseWorkspace(
   const nextSnapshot = await appendVersion(snapshot.paper as PaperRecord, nextVersion);
   return {
     snapshot: nextSnapshot,
-    diffSummary: `Applied revision on ${targetBlock.title}: ${request.changeRequest}`,
+    diffSummary: nextSnapshot.currentVersion.changeSummary?.summary || `Applied revision on ${targetBlock.title}: ${request.changeRequest}`,
     mode: modelResponse.mode,
-    route: 'quick-local',
+    route: 'codex',
   };
 }

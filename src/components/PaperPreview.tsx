@@ -1,5 +1,5 @@
 import { MessageSquareWarning } from 'lucide-react';
-import { MouseEvent, ReactNode } from 'react';
+import { MouseEvent, ReactNode, useEffect, useRef } from 'react';
 import { FigureBlock, PaperBlock, TableBlock, TextBlock } from '../types';
 
 export interface AnnotationTarget {
@@ -7,6 +7,7 @@ export interface AnnotationTarget {
   selectedText?: string;
   sourceFile?: string;
   sourceLine?: number;
+  column?: number;
   sourceSnippet?: string;
   anchor: { x: number; y: number };
 }
@@ -17,6 +18,7 @@ interface PaperPreviewProps {
   title?: string;
   subtitle?: string;
   compact?: boolean;
+  focusQuery?: string;
 }
 
 function requestTextAnnotation(blockId: string, onAnnotate: PaperPreviewProps['onAnnotate']) {
@@ -63,9 +65,9 @@ function renderBlockActions(blockId: string, onAnnotate?: PaperPreviewProps['onA
   );
 }
 
-function TextCard({ block, onAnnotate }: { block: TextBlock; onAnnotate?: PaperPreviewProps['onAnnotate'] }) {
+function TextCard({ block, onAnnotate, isFocused }: { block: TextBlock; onAnnotate?: PaperPreviewProps['onAnnotate']; isFocused?: boolean }) {
   return (
-    <article className="paper-block">
+    <article className={`paper-block ${isFocused ? 'paper-block--focused' : ''}`}>
       <header className="paper-block__header">
         <div>
           <span className="paper-block__section">{block.section}</span>
@@ -85,9 +87,9 @@ function TextCard({ block, onAnnotate }: { block: TextBlock; onAnnotate?: PaperP
   );
 }
 
-function FigureCard({ block, onAnnotate }: { block: FigureBlock; onAnnotate?: PaperPreviewProps['onAnnotate'] }) {
+function FigureCard({ block, onAnnotate, isFocused }: { block: FigureBlock; onAnnotate?: PaperPreviewProps['onAnnotate']; isFocused?: boolean }) {
   return (
-    <article className="paper-block">
+    <article className={`paper-block ${isFocused ? 'paper-block--focused' : ''}`}>
       <header className="paper-block__header">
         <div>
           <span className="paper-block__section">{block.section}</span>
@@ -104,9 +106,9 @@ function FigureCard({ block, onAnnotate }: { block: FigureBlock; onAnnotate?: Pa
   );
 }
 
-function TableCard({ block, onAnnotate }: { block: TableBlock; onAnnotate?: PaperPreviewProps['onAnnotate'] }) {
+function TableCard({ block, onAnnotate, isFocused }: { block: TableBlock; onAnnotate?: PaperPreviewProps['onAnnotate']; isFocused?: boolean }) {
   return (
-    <article className="paper-block">
+    <article className={`paper-block ${isFocused ? 'paper-block--focused' : ''}`}>
       <header className="paper-block__header">
         <div>
           <span className="paper-block__section">{block.section}</span>
@@ -140,7 +142,38 @@ function TableCard({ block, onAnnotate }: { block: TableBlock; onAnnotate?: Pape
   );
 }
 
-export function PaperPreview({ blocks, onAnnotate, title, subtitle, compact }: PaperPreviewProps) {
+function normalizePreviewMatchText(value?: string): string {
+  return (value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function blockMatchesFocusQuery(block: PaperBlock, query: string): boolean {
+  const normalizedQuery = normalizePreviewMatchText(query);
+  if (!normalizedQuery) {
+    return false;
+  }
+  const candidates = [
+    block.title,
+    block.section,
+    block.type === 'text' ? block.content.slice(0, 320) : block.caption,
+    block.type === 'figure' ? block.insight : block.type === 'table' ? block.note : '',
+  ];
+  return candidates.some((candidate) => {
+    const normalizedCandidate = normalizePreviewMatchText(candidate);
+    return normalizedCandidate.includes(normalizedQuery) || normalizedQuery.includes(normalizedCandidate);
+  });
+}
+
+export function PaperPreview({ blocks, onAnnotate, title, subtitle, compact, focusQuery }: PaperPreviewProps) {
+  const focusedBlockRef = useRef<HTMLElement | null>(null);
+  const normalizedFocusQuery = normalizePreviewMatchText(focusQuery);
+
+  useEffect(() => {
+    if (!normalizedFocusQuery || !focusedBlockRef.current) {
+      return;
+    }
+    focusedBlockRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [normalizedFocusQuery, blocks]);
+
   return (
     <section className={compact ? 'paper-canvas paper-canvas--compact' : 'paper-canvas'}>
       {!compact ? (
@@ -154,13 +187,47 @@ export function PaperPreview({ blocks, onAnnotate, title, subtitle, compact }: P
 
       <div className="paper-page">
         {blocks.map((block) => {
+          const isFocused = normalizedFocusQuery ? blockMatchesFocusQuery(block, normalizedFocusQuery) : false;
           if (block.type === 'text') {
-            return <TextCard key={block.id} block={block} onAnnotate={onAnnotate} />;
+            return (
+              <div
+                key={block.id}
+                ref={(node) => {
+                  if (isFocused && node) {
+                    focusedBlockRef.current = node;
+                  }
+                }}
+              >
+                <TextCard block={block} onAnnotate={onAnnotate} isFocused={isFocused} />
+              </div>
+            );
           }
           if (block.type === 'figure') {
-            return <FigureCard key={block.id} block={block} onAnnotate={onAnnotate} />;
+            return (
+              <div
+                key={block.id}
+                ref={(node) => {
+                  if (isFocused && node) {
+                    focusedBlockRef.current = node;
+                  }
+                }}
+              >
+                <FigureCard block={block} onAnnotate={onAnnotate} isFocused={isFocused} />
+              </div>
+            );
           }
-          return <TableCard key={block.id} block={block} onAnnotate={onAnnotate} />;
+          return (
+            <div
+              key={block.id}
+              ref={(node) => {
+                if (isFocused && node) {
+                  focusedBlockRef.current = node;
+                }
+              }}
+            >
+              <TableCard block={block} onAnnotate={onAnnotate} isFocused={isFocused} />
+            </div>
+          );
         })}
       </div>
     </section>

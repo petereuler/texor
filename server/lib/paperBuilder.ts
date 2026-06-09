@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 import { diffWordsWithSpace } from 'diff';
 import path from 'node:path';
-import { FigureBlock, ModelConfig, PaperBlock, PaperRecord, PaperVersion, ProjectAnalysis, TableBlock, TextBlock, WorkspaceSnapshot } from '../types.js';
+import { FigureBlock, ModelConfig, PaperBlock, PaperRecord, PaperVersion, ProjectAnalysis, TableBlock, TextBlock, WorkspaceRuntimeConfig, WorkspaceSnapshot } from '../types.js';
+import { enrichPaperVersion } from './manuscriptState.js';
 import { callOpenAICompatible } from './modelClient.js';
 
 function nowIso(): string {
@@ -26,6 +27,13 @@ interface WordDiffPart {
   value: string;
   added?: boolean;
   removed?: boolean;
+}
+
+interface StructuredLatexTextLine {
+  command: string;
+  prefix: string;
+  text: string;
+  suffix: string;
 }
 
 function tokenizeWithSpace(value: string): string[] {
@@ -109,11 +117,10 @@ function hasFullLatexDocument(latex: string): boolean {
 function injectDiffMacros(latex: string): string {
   const macros = [
     '\\usepackage{xcolor}',
-    '\\usepackage[normalem]{ulem}',
     '\\definecolor{texoraddfg}{RGB}{21,128,61}',
     '\\definecolor{texordelfg}{RGB}{185,28,28}',
-    '\\providecommand{\\texoradd}[1]{\\begingroup\\textcolor{texoraddfg}{\\uline{#1}}\\endgroup}',
-    '\\providecommand{\\texordel}[1]{\\begingroup\\textcolor{texordelfg}{\\sout{#1}}\\endgroup}',
+    '\\providecommand{\\texoradd}[1]{\\begingroup\\textcolor{texoraddfg}{#1}\\endgroup}',
+    '\\providecommand{\\texordel}[1]{\\begingroup\\textcolor{texordelfg}{#1}\\endgroup}',
     '',
   ].join('\n');
 
@@ -174,6 +181,48 @@ function markPlainLatexText(previous: string, current: string, side: 'previous' 
     .join('');
 }
 
+function extractStructuredLatexTextLine(line: string): StructuredLatexTextLine | null {
+  const match = line.match(/^(\s*\\([A-Za-z@]+)\*?(?:\[[^\]]*\])?\{)(.*)(\}\s*)$/);
+  if (!match) {
+    return null;
+  }
+  const command = (match[2] || '').toLowerCase();
+  if (!['title', 'author', 'section', 'subsection', 'subsubsection', 'chapter', 'paragraph', 'subparagraph', 'caption'].includes(command)) {
+    return null;
+  }
+  return {
+    command,
+    prefix: match[1],
+    text: match[3] || '',
+    suffix: match[4] || '',
+  };
+}
+
+function hasStructuredLatexTextChange(previousLine: string, currentLine: string): boolean {
+  const previousStructured = extractStructuredLatexTextLine(previousLine);
+  const currentStructured = extractStructuredLatexTextLine(currentLine);
+  return Boolean(
+    previousStructured &&
+      currentStructured &&
+      previousStructured.command === currentStructured.command &&
+      previousStructured.text !== currentStructured.text,
+  );
+}
+
+function collapseNestedDiffMacros(value: string): string {
+  let normalized = value;
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    const next = normalized
+      .replace(/\\texoradd\{\s*\\texoradd\{([\s\S]*?)\}\s*\}/g, '\\texoradd{$1}')
+      .replace(/\\texordel\{\s*\\texordel\{([\s\S]*?)\}\s*\}/g, '\\texordel{$1}');
+    if (next === normalized) {
+      break;
+    }
+    normalized = next;
+  }
+  return normalized;
+}
+
 function lineSimilarity(left: string, right: string): number {
   const leftTokens = new Set(left.toLowerCase().match(/[a-z0-9]+/g) || []);
   const rightTokens = new Set(right.toLowerCase().match(/[a-z0-9]+/g) || []);
@@ -218,7 +267,19 @@ function markFullLatexDiff(previousLatex: string, currentLatex: string, side: 'p
         : alignedReferenceLine(outputLine, currentLines, index);
     const previousLine = side === 'current' ? referenceLine : outputLine;
     const currentLine = side === 'current' ? outputLine : referenceLine;
-    if (isTextualLatexLine(previousLine) && isTextualLatexLine(currentLine)) {
+    const previousStructured = extractStructuredLatexTextLine(previousLine);
+    const currentStructured = extractStructuredLatexTextLine(currentLine);
+    if (previousStructured && currentStructured && previousStructured.command === currentStructured.command) {
+      const visibleLine = side === 'current' ? currentStructured : previousStructured;
+      const diffedText = collapseNestedDiffMacros(markPlainLatexText(previousStructured.text, currentStructured.text, side));
+      const hasInlineDiffMarker = /\\texor(?:add|del)\s*\{/.test(diffedText);
+      if (hasStructuredLatexTextChange(previousLine, currentLine) && !hasInlineDiffMarker) {
+        const wrappedText = collapseNestedDiffMacros(side === 'current' ? `\\texoradd{${diffedText}}` : `\\texordel{${diffedText}}`);
+        parts.push(`${visibleLine.prefix}${wrappedText}${visibleLine.suffix}`);
+      } else {
+        parts.push(`${visibleLine.prefix}${diffedText}${visibleLine.suffix}`);
+      }
+    } else if (isTextualLatexLine(previousLine) && isTextualLatexLine(currentLine)) {
       parts.push(markPlainLatexText(previousLine, currentLine, side));
     } else {
       parts.push(outputLine);
@@ -249,6 +310,17 @@ function compactPaths(paths: string[]): string {
       return parts.length <= 2 ? filePath : `${parts[0]}/${parts[parts.length - 1]}`;
     })
     .join(', ');
+}
+
+function compactCommandHints(analysis: ProjectAnalysis): string {
+  return analysis.dossier.commandHints
+    .slice(0, 3)
+    .map((hint) => `${hint.command} (${hint.source})`)
+    .join('; ');
+}
+
+function canonicalManuscriptSourcePath(rootPath: string): string {
+  return path.join(rootPath, '.texor', 'manuscript', 'main.tex');
 }
 
 function pickResultTable(analysis: ProjectAnalysis): TableBlock {
@@ -329,6 +401,10 @@ async function draftPaperBlocks(analysis: ProjectAnalysis, targetJournal: string
   const resultTable = pickResultTable(analysis);
   const figureBlock = pickFigure(analysis);
   const importantPaths = compactPaths(analysis.importantFiles.map((file) => file.path));
+  const datasetHints = analysis.dossier.datasetHints.length > 0 ? analysis.dossier.datasetHints.join(', ') : 'TBD datasets from repository evidence';
+  const metricHints = analysis.dossier.metricHints.length > 0 ? analysis.dossier.metricHints.join(', ') : 'TBD evaluation metrics';
+  const commandHints = compactCommandHints(analysis);
+  const openQuestions = analysis.dossier.openQuestions.slice(0, 2).join(' ');
 
   return [
     {
@@ -357,14 +433,14 @@ async function draftPaperBlocks(analysis: ProjectAnalysis, targetJournal: string
       type: 'text',
       section: 'Experimental Setup',
       title: 'Experimental Setup',
-      content: `The current repository suggests an experiment flow centered on ${importantPaths}. This section should be refined with exact datasets, splits, hardware, training protocol, and evaluation settings after the first drafting pass.`,
+      content: `The current repository suggests an experiment flow centered on ${importantPaths}. Dataset cues currently include ${datasetHints}. Candidate execution cues include ${commandHints || 'TBD runnable commands from the repository'}. This section should be refined with exact splits, hardware, training protocol, and evaluation settings after the first drafting pass.`,
     },
     {
       id: crypto.randomUUID(),
       type: 'text',
       section: 'Results',
       title: 'Results',
-      content: analysis.results.join(' '),
+      content: `${analysis.results.join(' ')} Quantitative interpretation should stay aligned with repository-visible metric cues such as ${metricHints}.`,
     },
     resultTable,
     figureBlock,
@@ -373,9 +449,26 @@ async function draftPaperBlocks(analysis: ProjectAnalysis, targetJournal: string
       type: 'text',
       section: 'Conclusion',
       title: 'Conclusion',
-      content: `${analysis.projectName} already contains enough code and result structure to support a paper draft. The remaining work is mainly to tighten the writing, replace placeholders with final figures and numbers, and refine the narrative through revision rounds.`,
+      content: `${analysis.projectName} already contains enough code and result structure to support a paper draft. The remaining work is mainly to tighten the writing, replace placeholders with final figures and numbers, and refine the narrative through revision rounds.${openQuestions ? ` Current evidence gaps to resolve include: ${openQuestions}` : ''}`,
     },
   ];
+}
+
+function projectDossierPrompt(analysis: ProjectAnalysis): string {
+  const commandHints = analysis.dossier.commandHints
+    .slice(0, 5)
+    .map((hint) => `- ${hint.command} [${hint.source}] ${hint.reason}`)
+    .join('\n');
+  return [
+    `Agent brief: ${analysis.dossier.agentBrief}`,
+    `Entrypoints:\n${analysis.dossier.entryPoints.map((item) => `- ${item}`).join('\n') || '- None detected.'}`,
+    `Experiment files:\n${analysis.dossier.experimentFiles.map((item) => `- ${item}`).join('\n') || '- None detected.'}`,
+    `Figure scripts:\n${analysis.dossier.figureScripts.map((item) => `- ${item}`).join('\n') || '- None detected.'}`,
+    `Dataset hints:\n${analysis.dossier.datasetHints.map((item) => `- ${item}`).join('\n') || '- None detected.'}`,
+    `Metric hints:\n${analysis.dossier.metricHints.map((item) => `- ${item}`).join('\n') || '- None detected.'}`,
+    `Command hints:\n${commandHints || '- None detected.'}`,
+    `Open questions:\n${analysis.dossier.openQuestions.map((item) => `- ${item}`).join('\n') || '- None currently flagged.'}`,
+  ].join('\n\n');
 }
 
 function projectEvidencePrompt(analysis: ProjectAnalysis): string {
@@ -398,6 +491,7 @@ function projectEvidencePrompt(analysis: ProjectAnalysis): string {
     `Purpose: ${analysis.purpose}`,
     `Detected methods:\n${analysis.methods.map((item) => `- ${item}`).join('\n')}`,
     `Detected results:\n${analysis.results.map((item) => `- ${item}`).join('\n')}`,
+    `Project dossier:\n${projectDossierPrompt(analysis)}`,
     `Important files:\n${files || 'No important files detected.'}`,
     `Result artifacts:\n${artifacts || 'No result artifacts detected.'}`,
     `Raw evidence:\n${analysis.rawEvidence.slice(0, 12).join('\n')}`,
@@ -436,7 +530,7 @@ async function draftPaperBlocksWithModel(
       {
         role: 'system',
         content:
-          'You are an academic writing assistant. Draft a project-aware manuscript outline from repository evidence. Return only valid JSON: an array of text blocks, each with section, title, and content. Do not invent numeric results. Mark unknown details as TBD.',
+          'You are an academic writing assistant. Draft a project-aware manuscript outline from repository evidence. Use the project dossier as the primary grounding summary, then use files and artifacts to refine it. Return only valid JSON: an array of text blocks, each with section, title, and content. Do not invent numeric results. Mark unknown details as TBD.',
       },
       {
         role: 'user',
@@ -531,11 +625,10 @@ ${block.note ? `\n${escapeLatex(block.note)}` : ''}`;
 \\usepackage{booktabs}
 \\usepackage{xcolor}
 \\usepackage{hyperref}
-\\usepackage[normalem]{ulem}
 \\definecolor{texoraddfg}{RGB}{21,128,61}
 \\definecolor{texordelfg}{RGB}{185,28,28}
-\\newcommand{\\texoradd}[1]{\\begingroup\\textcolor{texoraddfg}{\\uline{#1}}\\endgroup}
-\\newcommand{\\texordel}[1]{\\begingroup\\textcolor{texordelfg}{\\sout{#1}}\\endgroup}
+\\newcommand{\\texoradd}[1]{\\begingroup\\textcolor{texoraddfg}{#1}\\endgroup}
+\\newcommand{\\texordel}[1]{\\begingroup\\textcolor{texordelfg}{#1}\\endgroup}
 \\setlength{\\parskip}{0.5em}
 \\setlength{\\parindent}{0pt}
 \\begin{document}
@@ -571,6 +664,7 @@ export async function buildPaperWorkspace(
   analysis: ProjectAnalysis,
   targetJournal: string,
   modelConfig?: ModelConfig,
+  runtimeConfig?: WorkspaceRuntimeConfig,
 ): Promise<WorkspaceSnapshot> {
   const paperId = crypto.randomUUID();
   const paper: PaperRecord = {
@@ -578,22 +672,30 @@ export async function buildPaperWorkspace(
     title: `${analysis.projectName.replace(/[-_]/g, ' ')} manuscript draft`,
     targetJournal,
     authors: ['Author A', 'Author B'],
+    projectRoot: analysis.rootPath,
+    assetRoots: [analysis.rootPath],
     analysis,
+    runtimeConfig,
     createdAt: nowIso(),
   };
 
   const blocks = (await draftPaperBlocksWithModel(analysis, targetJournal, modelConfig)) || (await draftPaperBlocks(analysis, targetJournal));
   const latex = await composeLatex(paper, blocks);
-  const version: PaperVersion = {
+  const version: PaperVersion = enrichPaperVersion({
     id: crypto.randomUUID(),
     paperId,
     label: 'v1',
     summary: 'Initial AI draft',
     createdAt: nowIso(),
     sourceCommit: analysis.gitContext.head,
+    sourcePath: canonicalManuscriptSourcePath(analysis.rootPath),
     blocks,
     latex,
-  };
+  }, undefined, {
+    projectRoot: analysis.rootPath,
+    assetRoots: [analysis.rootPath],
+    sourcePath: canonicalManuscriptSourcePath(analysis.rootPath),
+  });
 
   return {
     paper,

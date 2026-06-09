@@ -7,6 +7,8 @@ import { buildPdfUrl, buildsDirForProject } from './buildPaths.js';
 
 const buildsDir = buildsDirForProject();
 
+type BibliographyTool = 'bibtex' | 'biber';
+
 async function ensureBuildsDir(): Promise<void> {
   await fs.mkdir(buildsDir, { recursive: true });
 }
@@ -42,7 +44,7 @@ export async function compileLatex(latex: string): Promise<CompileResult> {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(texFile, latex);
 
-  const log = await runLatexTwice(engine, 'manuscript.tex', outputDir, outputDir).catch((error: Error) => error.message);
+  const log = await runLatexPipeline(engine, latex, 'manuscript.tex', outputDir, outputDir).catch((error: Error) => error.message);
 
   const pdfPath = path.join(outputDir, 'manuscript.pdf');
   try {
@@ -98,11 +100,20 @@ function latexSearchEnv(outputDir: string, compileDir: string, extraInputDirs: s
 }
 
 async function runLatex(engine: string, texName: string, cwd: string, outputDir: string, extraInputDirs: string[] = []): Promise<string> {
+  return runCommand(
+    engine,
+    ['-synctex=1', '-interaction=nonstopmode', '-halt-on-error', `-output-directory=${toLatexPath(outputDir)}`, toLatexPath(texName)],
+    cwd,
+    latexSearchEnv(outputDir, cwd, extraInputDirs),
+  );
+}
+
+async function runCommand(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const chunks: string[] = [];
-    const child = spawn(engine, ['-synctex=1', '-interaction=nonstopmode', '-halt-on-error', `-output-directory=${toLatexPath(outputDir)}`, toLatexPath(texName)], {
+    const child = spawn(command, args, {
       cwd,
-      env: latexSearchEnv(outputDir, cwd, extraInputDirs),
+      env,
     });
     child.stdout.on('data', (data) => chunks.push(data.toString()));
     child.stderr.on('data', (data) => chunks.push(data.toString()));
@@ -118,10 +129,50 @@ async function runLatex(engine: string, texName: string, cwd: string, outputDir:
   });
 }
 
-async function runLatexTwice(engine: string, texName: string, cwd: string, outputDir: string, extraInputDirs: string[] = []): Promise<string> {
+async function runBibliographyTool(tool: BibliographyTool, jobName: string, outputDir: string, extraInputDirs: string[] = []): Promise<string> {
+  return runCommand(
+    tool,
+    [jobName],
+    outputDir,
+    latexSearchEnv(outputDir, outputDir, extraInputDirs),
+  );
+}
+
+async function detectBibliographyTool(latex: string, auxPath: string, bcfPath: string): Promise<BibliographyTool | null> {
+  const auxContent = await fs.readFile(auxPath, 'utf8').catch(() => '');
+  const hasBcf = await fs.access(bcfPath).then(() => true).catch(() => false);
+  const usesBiblatex =
+    /\\usepackage(?:\[[^\]]*\])?\{biblatex\}/.test(latex) ||
+    /\\addbibresource\{/.test(latex) ||
+    /\\printbibliography\b/.test(latex);
+
+  if (hasBcf || usesBiblatex) {
+    return 'biber';
+  }
+  if (/\\bibdata\b/.test(auxContent) || /\\bibliography\{/.test(latex)) {
+    return 'bibtex';
+  }
+  return null;
+}
+
+async function runLatexPipeline(engine: string, latex: string, texName: string, cwd: string, outputDir: string, extraInputDirs: string[] = []): Promise<string> {
+  const jobName = path.basename(texName, path.extname(texName));
   const first = await runLatex(engine, texName, cwd, outputDir, extraInputDirs);
+  const bibliographyTool = await detectBibliographyTool(
+    latex,
+    path.join(outputDir, `${jobName}.aux`),
+    path.join(outputDir, `${jobName}.bcf`),
+  );
+
+  if (!bibliographyTool) {
+    const second = await runLatex(engine, texName, cwd, outputDir, extraInputDirs);
+    return `${first}\n${second}`;
+  }
+
+  const bibliography = await runBibliographyTool(bibliographyTool, jobName, outputDir, extraInputDirs);
   const second = await runLatex(engine, texName, cwd, outputDir, extraInputDirs);
-  return `${first}\n${second}`;
+  const third = await runLatex(engine, texName, cwd, outputDir, extraInputDirs);
+  return `${first}\n${bibliography}\n${second}\n${third}`;
 }
 
 function projectRootForSource(sourcePath: string, explicitProjectRoot?: string): string {
@@ -166,7 +217,7 @@ export async function compileLatexProject(
   await fs.writeFile(texFile, latex);
 
   const texInput = toLatexPath(path.relative(sourceDir, texFile));
-  const log = await runLatexTwice(engine, texInput, sourceDir, outputDir, [
+  const log = await runLatexPipeline(engine, latex, texInput, sourceDir, outputDir, [
     rootPath,
     sourceDir,
     path.dirname(texFile),

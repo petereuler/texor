@@ -24,6 +24,23 @@ export interface GitContext {
   commits: GitCommit[];
 }
 
+export interface ProjectCommandHint {
+  command: string;
+  source: string;
+  reason: string;
+}
+
+export interface ProjectDossier {
+  agentBrief: string;
+  entryPoints: string[];
+  experimentFiles: string[];
+  figureScripts: string[];
+  datasetHints: string[];
+  metricHints: string[];
+  commandHints: ProjectCommandHint[];
+  openQuestions: string[];
+}
+
 export interface ProjectAnalysis {
   rootPath: string;
   projectName: string;
@@ -37,7 +54,86 @@ export interface ProjectAnalysis {
   resultArtifacts: ResultArtifact[];
   ingestNotes: string[];
   rawEvidence: string[];
+  dossier: ProjectDossier;
   gitContext: GitContext;
+}
+
+export interface ManuscriptRegion {
+  kind: 'abstract' | 'section' | 'subsection' | 'subsubsection' | 'figure' | 'table' | 'bibliography';
+  title: string;
+  label?: string;
+  lineStart: number;
+  lineEnd: number;
+  wordCount: number;
+  snippet: string;
+}
+
+export interface ManuscriptAsset {
+  kind: 'figure' | 'table';
+  label?: string;
+  caption?: string;
+  line: number;
+  referenceCount: number;
+  assetPath?: string;
+  assetPaths?: string[];
+  missingAssetPaths?: string[];
+  assetExists?: boolean;
+}
+
+export interface ManuscriptLabel {
+  key: string;
+  kind: 'figure' | 'table' | 'section' | 'equation' | 'algorithm' | 'other';
+  line: number;
+}
+
+export interface ManuscriptCitation {
+  key: string;
+  count: number;
+  firstLine: number;
+}
+
+export interface ManuscriptTodo {
+  kind: 'todo' | 'tbd' | 'citation-gap' | 'evidence-gap' | 'missing-asset';
+  line: number;
+  text: string;
+  regionTitle?: string;
+}
+
+export interface ManuscriptState {
+  schemaVersion: number;
+  extractedAt: string;
+  sectionMap: ManuscriptRegion[];
+  figures: ManuscriptAsset[];
+  tables: ManuscriptAsset[];
+  labels: ManuscriptLabel[];
+  citations: ManuscriptCitation[];
+  todos: ManuscriptTodo[];
+  unresolvedEvidenceGaps: string[];
+  stats: {
+    wordCount: number;
+    sectionCount: number;
+    figureCount: number;
+    tableCount: number;
+    citationCount: number;
+    todoCount: number;
+    missingAssetCount: number;
+  };
+}
+
+export interface VersionChangeSummary {
+  summary: string;
+  touchedRegions: string[];
+  addedTodos: string[];
+  removedTodos: string[];
+}
+
+export interface VersionFocusTarget {
+  sourceFile?: string;
+  sourceLine?: number;
+  sourceColumn?: number;
+  selectedText?: string;
+  pageHint?: number;
+  regionTitle?: string;
 }
 
 interface BaseBlock {
@@ -72,8 +168,112 @@ export interface ModelConfig {
   apiKey?: string;
   baseUrl?: string;
   model?: string;
+  reasoningEffort?: string;
   provider?: string;
   imageModel?: string;
+}
+
+export type ProjectExecutionTarget =
+  | {
+      kind: 'local';
+      rootPath: string;
+    }
+  | {
+      kind: 'ssh';
+      hostAlias: string;
+      remoteRoot: string;
+      mirrorRoot?: string;
+    };
+
+export interface SSHHostProfile {
+  alias: string;
+  hostname?: string;
+  user?: string;
+  port?: number;
+  identityFile?: string;
+}
+
+export interface VSCodeImportedKeybinding {
+  command: string;
+  key: string;
+  when?: string;
+}
+
+export interface VSCodeImportBundle {
+  source: string;
+  importedAt: string;
+  settings: Record<string, unknown>;
+  keybindings: VSCodeImportedKeybinding[];
+  colorTheme?: string;
+  iconTheme?: string;
+}
+
+export interface DesktopBootstrap {
+  isDesktop: boolean;
+  platform: string;
+  serverUrl?: string;
+  windowSessionKey?: string;
+  importedConfig?: VSCodeImportBundle | null;
+  diagnostics?: {
+    logDir?: string;
+    logPath?: string;
+    bundlePath?: string;
+    bundleAvailable?: boolean;
+    logChannels?: Array<{
+      channel: 'desktop-main' | 'desktop-preload' | 'desktop-renderer' | 'desktop-server';
+      path: string;
+      exists: boolean;
+      sizeBytes?: number;
+      updatedAt?: string;
+    }>;
+    startupStatus?: 'ready' | 'degraded';
+    notes?: string[];
+  };
+}
+
+export interface DesktopPreparedTarget {
+  target: ProjectExecutionTarget;
+  effectiveRootPath: string;
+  displayLabel: string;
+  syncedAt?: string;
+}
+
+export interface WorkspaceFileNode {
+  path: string;
+  name: string;
+  kind: 'file' | 'directory';
+  depth: number;
+}
+
+export interface WorkspaceFileContent {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceCommandResult {
+  ok: boolean;
+  command: string;
+  cwd: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+export type AgentBackend = 'texor-agent' | 'codex-cli' | 'codex-native' | 'claude-code';
+
+export type TaskSpeedMode = 'quick' | 'deep';
+
+export interface WorkspaceRuntimeConfig {
+  agentBackend: AgentBackend;
+  taskSpeedMode?: TaskSpeedMode;
+  texorAgent?: ModelConfig;
+  codex?: {
+    model?: string;
+    reasoningEffort?: string;
+  };
+  claude?: {
+    model?: string;
+  };
 }
 
 export interface PaperRecord {
@@ -82,10 +282,13 @@ export interface PaperRecord {
   targetJournal: string;
   authors: string[];
   projectRoot?: string;
+  executionTarget?: ProjectExecutionTarget;
   assetRoots?: string[];
   analysis?: ProjectAnalysis;
   codexSessionId?: string;
+  codexSessionBackend?: AgentBackend;
   codexSessionUpdatedAt?: string;
+  runtimeConfig?: WorkspaceRuntimeConfig;
   createdAt: string;
 }
 
@@ -100,6 +303,9 @@ export interface PaperVersion {
   sourcePath?: string;
   blocks: PaperBlock[];
   latex: string;
+  focusTarget?: VersionFocusTarget;
+  manuscriptState?: ManuscriptState;
+  changeSummary?: VersionChangeSummary;
 }
 
 export interface WorkspaceSnapshot {
@@ -113,8 +319,10 @@ export interface WorkspaceSummary {
   title: string;
   targetJournal: string;
   projectRoot?: string;
+  executionTarget?: ProjectExecutionTarget;
   sourcePath?: string;
   codexSessionId?: string;
+  codexSessionBackend?: AgentBackend;
   codexSessionUpdatedAt?: string;
   currentVersionId: string;
   currentVersionLabel: string;
@@ -130,6 +338,7 @@ export interface RevisionPayload {
   selectedText?: string;
   sourceFile?: string;
   sourceLine?: number;
+  sourceColumn?: number;
   sourceSnippet?: string;
   issue: string;
   changeRequest: string;
@@ -140,7 +349,7 @@ export interface RevisionResult {
   snapshot: WorkspaceSnapshot;
   diffSummary: string;
   mode: 'mock' | 'openai-compatible';
-  route?: 'quick-local' | 'codex';
+  route?: 'quick-local' | 'structured-patch' | 'codex';
 }
 
 export type CodexFeedbackStatus = 'open' | 'accepted' | 'done' | 'dismissed';
@@ -157,6 +366,7 @@ export interface CodexFeedback {
   issue: string;
   changeRequest: string;
   source: 'texor-web' | 'vscode';
+  taskSpeedMode?: TaskSpeedMode;
   status: CodexFeedbackStatus;
   createdAt: string;
   updatedAt: string;
@@ -169,10 +379,12 @@ export interface CodexFeedbackPayload {
   selectedText?: string;
   sourceFile?: string;
   sourceLine?: number;
+  sourceColumn?: number;
   sourceSnippet?: string;
   issue: string;
   changeRequest: string;
   source?: CodexFeedback['source'];
+  taskSpeedMode?: TaskSpeedMode;
 }
 
 export interface CompileResult {
@@ -213,16 +425,48 @@ export interface PdfSelectionLocateResult {
   message?: string;
 }
 
+export interface SourceLineLocateRequest {
+  pdfUrl: string;
+  sourcePath?: string;
+  projectRoot?: string;
+  line: number;
+  column?: number;
+  pageHint?: number;
+}
+
+export interface SourceLineLocateResult {
+  ok: boolean;
+  page?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  message?: string;
+}
+
 export interface TemplateCatalogEntry {
   id: string;
   name: string;
   publisher: string;
   type: 'journal' | 'conference' | 'journal-conference';
   templateFamily: string;
+  sourceProvider:
+    | 'ieee'
+    | 'acm'
+    | 'elsevier'
+    | 'iclr'
+    | 'neurips'
+    | 'cvf'
+    | 'icml'
+    | 'aaai'
+    | 'springer'
+    | 'generic';
+  sourceKind: 'official-page' | 'direct-archive' | 'hybrid';
   localPath: string;
   archivePath: string;
   sourceUrl: string;
   officialPage: string;
+  fallbackUrls?: string[];
   aliases: string[];
 }
 
@@ -252,6 +496,7 @@ export interface TemplateSuggestion {
 export interface HealthResponse {
   ok: boolean;
   sampleProjectPath: string | null;
+  desktop?: DesktopBootstrap;
 }
 
 export type BridgeCommandType = 'codex-task' | 'capture-active-latex';
@@ -281,21 +526,31 @@ export interface BridgeCommandLogEntry {
   message: string;
 }
 
+export type DraftingMode = 'understand-project' | 'initial-draft' | 'continue';
+
+export type CodexTaskIntent = 'auto' | 'chat' | 'edit';
+
 export interface CodexTaskCommandPayload {
   projectPath: string;
   targetJournal?: string;
   instruction: string;
-  agentBackend?: 'texor-agent' | 'codex-cli';
+  followupInstruction?: string;
+  taskSpeedMode?: TaskSpeedMode;
+  agentBackend?: AgentBackend;
   modelConfig?: ModelConfig;
   paperId?: string;
   versionId?: string;
   baseVersionId?: string;
+  focusVersionId?: string;
   selectedText?: string;
   sourceFile?: string;
   sourceLine?: number;
+  sourceColumn?: number;
   sourceSnippet?: string;
   source?: 'browser' | 'annotation';
-  draftingMode?: 'initial-draft' | 'continue';
+  draftingMode?: DraftingMode;
+  taskIntent?: CodexTaskIntent;
+  windowSessionKey?: string;
   resumeSessionId?: string;
   continuedFromCommandId?: string;
 }
@@ -308,6 +563,10 @@ export interface CaptureActiveLatexCommandPayload {
   basedOnVersionId?: string;
   projectRoot?: string;
   sourcePath?: string;
+}
+
+export interface DesktopOpenProjectRequest {
+  target: ProjectExecutionTarget;
 }
 
 export type BridgeCommandPayload = CodexTaskCommandPayload | CaptureActiveLatexCommandPayload;
